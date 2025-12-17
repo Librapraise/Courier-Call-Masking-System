@@ -1,0 +1,197 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { supabaseAdmin } from '@/lib/supabase/server'
+import { createServerClient } from '@supabase/ssr'
+import { createClient } from '@supabase/supabase-js'
+import twilio from 'twilio'
+
+export async function POST(request: NextRequest) {
+  try {
+    // Validate Twilio environment variables
+    const accountSid = process.env.TWILIO_ACCOUNT_SID
+    const authToken = process.env.TWILIO_AUTH_TOKEN
+    const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER
+
+    if (!accountSid || !authToken || !twilioPhoneNumber) {
+      return NextResponse.json(
+        { error: 'Twilio configuration is missing. Please check environment variables.' },
+        { status: 500 }
+      )
+    }
+
+    const body = await request.json()
+    const { customerId, accessToken } = body
+
+    if (!customerId) {
+      return NextResponse.json(
+        { error: 'Missing required parameter: customerId' },
+        { status: 400 }
+      )
+    }
+
+    // Verify user session using access token
+    let user = null
+    let authError = null
+
+    if (accessToken) {
+      // Create a client with the access token in headers
+      const supabaseWithToken = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          global: {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          },
+        }
+      )
+      const result = await supabaseWithToken.auth.getUser()
+      user = result.data.user
+      authError = result.error
+    } else {
+      // Fallback: try cookies
+      const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          cookies: {
+            getAll() {
+              return request.cookies.getAll()
+            },
+            setAll() {
+              // No-op for API routes
+            },
+          },
+        }
+      )
+      const result = await supabase.auth.getUser()
+      user = result.data.user
+      authError = result.error
+    }
+    
+    if (authError || !user) {
+      console.error('Auth error:', authError?.message || 'No user found', 'Has token:', !!accessToken)
+      return NextResponse.json(
+        { error: 'Unauthorized - Please log in', details: authError?.message || 'Session not found' },
+        { status: 401 }
+      )
+    }
+
+
+    // Verify courier is authenticated and get their profile
+    const { data: courierProfile, error: courierError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, role, email, phone_number')
+      .eq('id', user.id)
+      .single()
+
+    if (courierError || !courierProfile) {
+      return NextResponse.json(
+        { error: 'User profile not found' },
+        { status: 401 }
+      )
+    }
+
+    if (courierProfile.role !== 'courier') {
+      return NextResponse.json(
+        { error: 'Only couriers can initiate calls' },
+        { status: 403 }
+      )
+    }
+
+    // Get courier's phone number from profile
+    const courierPhoneNumber = courierProfile.phone_number || process.env.COURIER_PHONE_NUMBER
+    
+    if (!courierPhoneNumber) {
+      return NextResponse.json(
+        { error: 'Courier phone number not configured' },
+        { status: 400 }
+      )
+    }
+
+    // Fetch customer phone number (server-side only - never sent to frontend)
+    const { data: customer, error: customerError } = await supabaseAdmin
+      .from('customers')
+      .select('id, name, phone_number, is_active')
+      .eq('id', customerId)
+      .single()
+
+    if (customerError || !customer) {
+      return NextResponse.json(
+        { error: 'Customer not found' },
+        { status: 404 }
+      )
+    }
+
+    if (!customer.is_active) {
+      return NextResponse.json(
+        { error: 'Customer is inactive' },
+        { status: 400 }
+      )
+    }
+
+    // Validate webhook URL (Twilio requires publicly accessible URL)
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+    const webhookUrl = `${appUrl}/api/call/connect?customerPhone=${encodeURIComponent(customer.phone_number)}`
+    
+    // Check if using localhost (Twilio can't reach localhost)
+    if (webhookUrl.includes('localhost') || webhookUrl.includes('127.0.0.1')) {
+      return NextResponse.json(
+        { 
+          error: 'Twilio webhook URL must be publicly accessible. For local development, use ngrok or deploy to a public URL.',
+          details: 'Current URL: ' + webhookUrl
+        },
+        { status: 400 }
+      )
+    }
+
+    // Initialize Twilio client
+    const client = twilio(accountSid, authToken)
+
+    // Initiate Twilio call
+    // Call flow: Courier's phone → Twilio number → Customer's phone
+    // We call the courier first, then connect them to the customer
+    try {
+      const call = await client.calls.create({
+        to: courierPhoneNumber,
+        from: twilioPhoneNumber,
+        url: webhookUrl,
+        method: 'POST',
+      })
+
+      // Log call attempt
+      await supabaseAdmin.from('call_logs').insert({
+        customer_id: customerId,
+        courier_id: user.id,
+        call_status: call.status || 'initiated',
+      })
+
+      return NextResponse.json({
+        success: true,
+        callSid: call.sid,
+        message: 'Call initiated successfully',
+      })
+    } catch (twilioError: any) {
+      console.error('Twilio error:', twilioError)
+
+      // Log failed call attempt
+      await supabaseAdmin.from('call_logs').insert({
+        customer_id: customerId,
+        courier_id: user.id,
+        call_status: `failed: ${twilioError.message}`,
+      })
+
+      return NextResponse.json(
+        { error: `Failed to initiate call: ${twilioError.message}` },
+        { status: 500 }
+      )
+    }
+  } catch (error: any) {
+    console.error('API error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
+
