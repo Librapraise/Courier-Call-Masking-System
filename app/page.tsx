@@ -72,6 +72,15 @@ export default function Home() {
             </li>
           </ul>
         </div>
+
+        <div className="mt-8 text-center">
+          <Link
+            href="/api-docs"
+            className="inline-flex items-center rounded-md bg-gray-600 px-4 py-2 text-white hover:bg-gray-700"
+          >
+            View API Documentation
+          </Link>
+        </div>
       </div>
     </div>
   )

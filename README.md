@@ -78,9 +78,20 @@ npm run dev
 - Admins have full CRUD access to customers
 - All authenticated users can insert call logs
 
-## API Routes
+## API Documentation
 
-### POST /api/call/initiate
+Interactive API documentation is available at `/api-docs` when running the development server.
+
+Visit `http://localhost:3000/api-docs` to view the Swagger UI documentation with:
+- Complete API endpoint descriptions
+- Request/response schemas
+- Authentication requirements
+- Example requests and responses
+- Try-it-out functionality
+
+### API Routes
+
+#### POST /api/call/initiate
 
 Initiates a masked call between courier and customer.
 
@@ -88,7 +99,7 @@ Initiates a masked call between courier and customer.
 ```json
 {
   "customerId": "uuid",
-  "courierId": "uuid"
+  "accessToken": "jwt-token"
 }
 ```
 
@@ -100,6 +111,10 @@ Initiates a masked call between courier and customer.
   "message": "Call initiated successfully"
 }
 ```
+
+#### POST /api/call/connect
+
+Internal Twilio webhook endpoint (not for direct use).
 
 ## Deployment to Vercel
 
