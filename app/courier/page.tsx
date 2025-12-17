@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
 import type { CustomerPublic } from '@/types/database'
 
@@ -108,12 +109,20 @@ export default function CourierPage() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 items-center justify-between">
             <h1 className="text-xl font-semibold text-gray-900">Courier Dashboard</h1>
-            <button
-              onClick={handleLogout}
-              className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
-            >
-              Logout
-            </button>
+            <div className="flex gap-4">
+              <Link
+                href="/courier/settings"
+                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Settings
+              </Link>
+              <button
+                onClick={handleLogout}
+                className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </nav>

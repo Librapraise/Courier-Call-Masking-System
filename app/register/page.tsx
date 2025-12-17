@@ -9,6 +9,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -36,6 +37,13 @@ export default function RegisterPage() {
       return
     }
 
+    // Validate phone number format (E.164 format)
+    if (phoneNumber && !/^\+?[1-9]\d{1,14}$/.test(phoneNumber)) {
+      setError('Please enter a valid phone number in E.164 format (e.g., +1234567890)')
+      setLoading(false)
+      return
+    }
+
     try {
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -45,6 +53,22 @@ export default function RegisterPage() {
       if (signUpError) throw signUpError
 
       if (data.user) {
+        // Update profile with phone number if provided
+        if (phoneNumber) {
+          // Format phone number to ensure it starts with +
+          const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`
+          
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .update({ phone_number: formattedPhone })
+            .eq('id', data.user.id)
+
+          if (profileError) {
+            console.error('Error updating phone number:', profileError)
+            // Don't fail registration if phone update fails, just log it
+          }
+        }
+
         setSuccess(true)
         // If session exists, email confirmation is disabled - redirect immediately
         if (data.session) {
@@ -109,6 +133,24 @@ export default function RegisterPage() {
                 className="mt-1 block w-full rounded-md text-black border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
                 placeholder="Enter your email"
               />
+            </div>
+            <div>
+              <label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700">
+                Phone Number <span className="text-gray-500">(Optional)</span>
+              </label>
+              <input
+                id="phoneNumber"
+                name="phoneNumber"
+                type="tel"
+                autoComplete="tel"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                className="mt-1 block w-full rounded-md text-black border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                placeholder="+1234567890 (E.164 format)"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Add your phone number to enable call functionality. You can add it later in your profile.
+              </p>
             </div>
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">

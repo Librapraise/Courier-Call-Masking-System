@@ -103,14 +103,18 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
      ```
 
 3. **Create Courier User**
-   - Create another user in Authentication
-   - Set their phone number:
+   - **Option 1**: Use the registration form at `/register` - couriers can add their phone number during signup!
+   - **Option 2**: Create manually in Authentication, then set phone number:
      ```sql
      UPDATE profiles 
      SET phone_number = '+1234567890' 
      WHERE id = 'courier-user-id-here';
      ```
    - (Default role is 'courier', so no need to update)
+   
+   **Note**: Couriers can add or update their phone number:
+   - During registration (optional field)
+   - In their settings page at `/courier/settings` after logging in
 
 ### 7. Run Development Server
 

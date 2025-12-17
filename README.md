@@ -9,6 +9,7 @@ A web-based system that allows couriers to call customers without seeing their p
 - **Customer Management**: Admins can add, edit, and deactivate customers
 - **Call Logging**: All call attempts are logged for tracking
 - **Row Level Security**: Database-level security ensures couriers never see phone numbers
+- **Self-Service Phone Number**: Couriers can add/update their phone number during registration or in settings
 
 ## Tech Stack
 

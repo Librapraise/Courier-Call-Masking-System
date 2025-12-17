@@ -35,12 +35,26 @@ ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE call_logs ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for profiles
+-- Drop existing policies if they exist (for idempotency)
+DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can update own phone number" ON profiles;
+
 -- Users can read their own profile
 CREATE POLICY "Users can view own profile"
   ON profiles FOR SELECT
   USING (auth.uid() = id);
 
+-- Users can update their own phone number
+CREATE POLICY "Users can update own phone number"
+  ON profiles FOR UPDATE
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);
+
 -- RLS Policies for customers
+-- Drop existing policies if they exist (for idempotency)
+DROP POLICY IF EXISTS "Couriers can view customer names only" ON customers;
+DROP POLICY IF EXISTS "Admins can manage all customers" ON customers;
+
 -- Couriers can only SELECT customer names (not phone numbers)
 CREATE POLICY "Couriers can view customer names only"
   ON customers FOR SELECT
@@ -72,6 +86,10 @@ CREATE POLICY "Admins can manage all customers"
   );
 
 -- RLS Policies for call_logs
+-- Drop existing policies if they exist (for idempotency)
+DROP POLICY IF EXISTS "Authenticated users can insert call logs" ON call_logs;
+DROP POLICY IF EXISTS "Users can view own call logs" ON call_logs;
+
 -- All authenticated users can INSERT into call_logs
 CREATE POLICY "Authenticated users can insert call logs"
   ON call_logs FOR INSERT
