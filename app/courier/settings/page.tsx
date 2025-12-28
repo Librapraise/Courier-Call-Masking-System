@@ -107,7 +107,7 @@ export default function CourierSettingsPage() {
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-3 sm:py-0">
+          <div className="flex lg:h-16 md:h-24 flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-3 sm:py-0">
             <h1 className="text-lg sm:text-xl font-semibold text-gray-900">Courier Settings</h1>
             <div className="flex flex-wrap gap-2 sm:gap-4">
               <Link
