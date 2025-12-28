@@ -330,24 +330,24 @@ export default function TestingPage() {
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900">Testing Suite</h1>
-            <div className="flex gap-4">
+          <div className="flex lg:h-16 md:h-24 flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-3 sm:py-0">
+            <h1 className="text-lg sm:text-xl font-semibold text-gray-900">Testing Suite</h1>
+            <div className="flex flex-wrap gap-2 sm:gap-4">
               <Link
                 href="/admin/dashboard"
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                className="rounded-md bg-blue-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-blue-700"
               >
                 Dashboard
               </Link>
               <Link
                 href="/admin"
-                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
               >
                 Customers
               </Link>
               <button
                 onClick={handleLogout}
-                className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
+                className="rounded-md bg-gray-200 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-300"
               >
                 Logout
               </button>
@@ -356,18 +356,18 @@ export default function TestingPage() {
         </div>
       </nav>
 
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex items-center justify-between">
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:py-8 sm:px-6 lg:px-8">
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">End-to-End Testing</h2>
-            <p className="mt-1 text-sm text-gray-600">
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">End-to-End Testing</h2>
+            <p className="mt-1 text-xs sm:text-sm text-gray-600">
               Test all system functionality
             </p>
           </div>
           <button
             onClick={runAllTests}
             disabled={running}
-            className="rounded-md bg-blue-600 px-6 py-2 text-white hover:bg-blue-700 disabled:bg-gray-400"
+            className="rounded-md bg-blue-600 px-4 sm:px-6 py-2 text-sm sm:text-base text-white hover:bg-blue-700 disabled:bg-gray-400"
           >
             {running ? 'Running Tests...' : 'Run All Tests'}
           </button>
@@ -375,25 +375,25 @@ export default function TestingPage() {
 
         <div className="space-y-4">
           {tests.map((test) => (
-            <div key={test.id} className="rounded-lg bg-white p-6 shadow">
-              <div className="flex items-center justify-between">
+            <div key={test.id} className="rounded-lg bg-white p-4 sm:p-6 shadow">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex-1">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                     <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${getStatusColor(test.status)}`}>
                       {test.status.toUpperCase()}
                     </span>
-                    <h3 className="text-lg font-semibold text-gray-900">
+                    <h3 className="text-base sm:text-lg font-semibold text-gray-900">
                       Test {test.id}: {test.name}
                     </h3>
                   </div>
                   {test.message && (
-                    <p className="mt-2 text-sm text-gray-600">{test.message}</p>
+                    <p className="mt-2 text-xs sm:text-sm text-gray-600">{test.message}</p>
                   )}
                 </div>
                 <button
                   onClick={() => runTest(test.id)}
                   disabled={running || test.status === 'running'}
-                  className="ml-4 rounded-md bg-gray-600 px-4 py-2 text-sm text-white hover:bg-gray-700 disabled:bg-gray-400"
+                  className="w-full sm:w-auto rounded-md bg-gray-600 px-4 py-2 text-sm text-white hover:bg-gray-700 disabled:bg-gray-400"
                 >
                   Run Test
                 </button>

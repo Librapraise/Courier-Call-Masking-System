@@ -169,36 +169,36 @@ export default function AdminDashboard() {
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900">Admin Dashboard</h1>
-            <div className="flex gap-4">
+          <div className="flex lg:h-16 md:h-24 h-32 flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-3 sm:py-0">
+            <h1 className="text-lg sm:text-xl font-semibold text-gray-900">Admin Dashboard</h1>
+            <div className="flex flex-wrap gap-2 sm:gap-4">
               <Link
                 href="/admin"
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                className="rounded-md bg-blue-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-blue-700"
               >
                 Manage Customers
               </Link>
               <Link
                 href="/admin/logs"
-                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
               >
                 Call Logs
               </Link>
               <Link
                 href="/admin/settings"
-                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
               >
                 Settings
               </Link>
               <Link
                 href="/admin/guide"
-                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
               >
                 Guide
               </Link>
               <button
                 onClick={handleLogout}
-                className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
+                className="rounded-md bg-gray-200 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-300"
               >
                 Logout
               </button>
@@ -207,10 +207,10 @@ export default function AdminDashboard() {
         </div>
       </nav>
 
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold text-gray-900">Dashboard Overview</h2>
-          <p className="mt-1 text-sm text-gray-600">Today's call statistics and system status</p>
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:py-8 sm:px-6 lg:px-8">
+        <div className="mb-6 sm:mb-8">
+          <h2 className="text-2xl sm:text-3xl font-bold text-gray-900">Dashboard Overview</h2>
+          <p className="mt-1 text-xs sm:text-sm text-gray-600">Today's call statistics and system status</p>
         </div>
 
         {/* System Status */}
@@ -238,27 +238,27 @@ export default function AdminDashboard() {
         </div>
 
         {/* Statistics Cards */}
-        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-lg bg-white p-6 shadow">
-            <p className="text-sm font-medium text-gray-600">Total Calls Today</p>
-            <p className="mt-2 text-3xl font-bold text-gray-900">{stats.totalCallsToday}</p>
+        <div className="mb-6 sm:mb-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="rounded-lg bg-white p-4 sm:p-6 shadow">
+            <p className="text-xs sm:text-sm font-medium text-gray-600">Total Calls Today</p>
+            <p className="mt-2 text-2xl sm:text-3xl font-bold text-gray-900">{stats.totalCallsToday}</p>
           </div>
-          <div className="rounded-lg bg-white p-6 shadow">
-            <p className="text-sm font-medium text-gray-600">Success Rate</p>
-            <p className="mt-2 text-3xl font-bold text-green-600">{successRate}%</p>
+          <div className="rounded-lg bg-white p-4 sm:p-6 shadow">
+            <p className="text-xs sm:text-sm font-medium text-gray-600">Success Rate</p>
+            <p className="mt-2 text-2xl sm:text-3xl font-bold text-green-600">{successRate}%</p>
             <p className="mt-1 text-xs text-gray-500">
               {stats.successfulCalls} successful / {stats.failedCalls} failed
             </p>
           </div>
-          <div className="rounded-lg bg-white p-6 shadow">
-            <p className="text-sm font-medium text-gray-600">Avg. Duration</p>
-            <p className="mt-2 text-3xl font-bold text-gray-900">
+          <div className="rounded-lg bg-white p-4 sm:p-6 shadow">
+            <p className="text-xs sm:text-sm font-medium text-gray-600">Avg. Duration</p>
+            <p className="mt-2 text-2xl sm:text-3xl font-bold text-gray-900">
               {stats.averageDuration > 0 ? `${stats.averageDuration}s` : 'N/A'}
             </p>
           </div>
-          <div className="rounded-lg bg-white p-6 shadow">
-            <p className="text-sm font-medium text-gray-600">Active Customers</p>
-            <p className="mt-2 text-3xl font-bold text-gray-900">{stats.activeCustomers}</p>
+          <div className="rounded-lg bg-white p-4 sm:p-6 shadow">
+            <p className="text-xs sm:text-sm font-medium text-gray-600">Active Customers</p>
+            <p className="mt-2 text-2xl sm:text-3xl font-bold text-gray-900">{stats.activeCustomers}</p>
           </div>
         </div>
 
@@ -273,26 +273,26 @@ export default function AdminDashboard() {
 
         {/* Recent Calls */}
         <div className="rounded-lg bg-white shadow">
-          <div className="border-b border-gray-200 px-6 py-4">
-            <h3 className="text-lg font-semibold text-gray-900">Recent Call Activity</h3>
+          <div className="border-b border-gray-200 px-4 sm:px-6 py-3 sm:py-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900">Recent Call Activity</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                     Customer
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hidden sm:table-cell">
                     Agent
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                     Status
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hidden md:table-cell">
                     Duration
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hidden lg:table-cell">
                     Time
                   </th>
                 </tr>
@@ -300,20 +300,23 @@ export default function AdminDashboard() {
               <tbody className="divide-y divide-gray-200 bg-white">
                 {stats.recentCalls.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500">
+                    <td colSpan={5} className="px-4 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
                       No calls today
                     </td>
                   </tr>
                 ) : (
                   stats.recentCalls.map((call) => (
                     <tr key={call.id}>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">
-                        {call.customer_name || 'Unknown'}
+                      <td className="px-3 sm:px-6 py-4 text-xs sm:text-sm font-medium text-gray-900">
+                        <div className="flex flex-col">
+                          <span>{call.customer_name || 'Unknown'}</span>
+                          <span className="text-xs text-gray-500 sm:hidden mt-1">{call.agent_name || 'Unknown'}</span>
+                        </div>
                       </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
+                      <td className="hidden sm:table-cell px-6 py-4 text-sm text-gray-500">
                         {call.agent_name || 'Unknown'}
                       </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm">
+                      <td className="px-3 sm:px-6 py-4 text-xs sm:text-sm">
                         <span
                           className={`inline-flex rounded-full px-2 text-xs font-semibold ${
                             call.call_status === 'completed' || call.call_status === 'connected'
@@ -326,10 +329,10 @@ export default function AdminDashboard() {
                           {call.call_status}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
+                      <td className="hidden md:table-cell px-6 py-4 text-sm text-gray-500">
                         {call.call_duration ? `${call.call_duration}s` : '-'}
                       </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
+                      <td className="hidden lg:table-cell px-6 py-4 text-sm text-gray-500">
                         {call.call_timestamp
                           ? new Date(call.call_timestamp).toLocaleTimeString()
                           : '-'}

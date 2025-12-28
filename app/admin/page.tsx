@@ -202,36 +202,36 @@ export default function AdminPage() {
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900">Customer Management</h1>
-            <div className="flex gap-4">
+          <div className="flex lg:h-16 md:h-24 flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-3 sm:py-0">
+            <h1 className="text-lg sm:text-xl font-semibold text-gray-900">Customer Management</h1>
+            <div className="flex flex-wrap gap-2 sm:gap-4">
               <Link
                 href="/admin/dashboard"
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                className="rounded-md bg-blue-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-blue-700"
               >
                 Dashboard
               </Link>
               <Link
                 href="/admin/logs"
-                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
               >
                 Call Logs
               </Link>
               <Link
                 href="/admin/settings"
-                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
               >
                 Settings
               </Link>
               <Link
                 href="/admin/testing"
-                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
               >
                 Testing
               </Link>
               <button
                 onClick={handleLogout}
-                className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
+                className="rounded-md bg-gray-200 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-300"
               >
                 Logout
               </button>
@@ -241,28 +241,28 @@ export default function AdminPage() {
       </nav>
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">Customer Management</h2>
-            <p className="mt-1 text-sm text-gray-600">
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Customer Management</h2>
+            <p className="mt-1 text-xs sm:text-sm text-gray-600">
               Manage customers and their contact information
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <button
               onClick={() => {
                 setShowAddForm(!showAddForm)
                 setEditingCustomer(null)
                 setFormData({ name: '', phone_number: '' })
               }}
-              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm sm:text-base text-white hover:bg-blue-700"
             >
               {showAddForm ? 'Cancel' : 'Add Customer'}
             </button>
             <button
               onClick={handleReset}
               disabled={resetting}
-              className="rounded-md bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:bg-gray-400"
+              className="rounded-md bg-red-600 px-4 py-2 text-sm sm:text-base text-white hover:bg-red-700 disabled:bg-gray-400"
               title="Reset daily list - clears all customers"
             >
               {resetting ? 'Resetting...' : 'Reset List'}
@@ -349,20 +349,20 @@ export default function AdminPage() {
             <p className="text-gray-600">No customers found. Add your first customer above.</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-lg bg-white shadow">
+          <div className="overflow-x-auto rounded-lg bg-white shadow">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                     Name
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hidden sm:table-cell">
                     Phone Number
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                     Status
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
                     Actions
                   </th>
                 </tr>
@@ -370,13 +370,16 @@ export default function AdminPage() {
               <tbody className="divide-y divide-gray-200 bg-white">
                 {customers.map((customer) => (
                   <tr key={customer.id}>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">
-                      {customer.name}
+                    <td className="px-3 sm:px-6 py-4 text-sm font-medium text-gray-900">
+                      <div className="flex flex-col">
+                        <span>{customer.name}</span>
+                        <span className="text-xs text-gray-500 sm:hidden mt-1">{customer.phone_number}</span>
+                      </div>
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
+                    <td className="hidden sm:table-cell px-6 py-4 text-sm text-gray-500">
                       {customer.phone_number}
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm">
+                    <td className="px-3 sm:px-6 py-4 text-sm">
                       <span
                         className={`inline-flex rounded-full px-2 text-xs font-semibold ${
                           customer.is_active
@@ -387,25 +390,25 @@ export default function AdminPage() {
                         {customer.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-right text-sm">
-                      <div className="flex justify-end gap-2">
+                    <td className="px-3 sm:px-6 py-4 text-right text-sm">
+                      <div className="flex flex-col sm:flex-row justify-end gap-2">
                         <button
                           onClick={() => handleEdit(customer)}
-                          className="rounded-md bg-blue-600 px-3 py-1 text-white hover:bg-blue-700"
+                          className="rounded-md bg-blue-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-blue-700"
                         >
                           Edit
                         </button>
                         {customer.is_active ? (
                           <button
                             onClick={() => handleDelete(customer.id)}
-                            className="rounded-md bg-red-600 px-3 py-1 text-white hover:bg-red-700"
+                            className="rounded-md bg-red-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-red-700"
                           >
                             Deactivate
                           </button>
                         ) : (
                           <button
                             onClick={() => handleReactivate(customer.id)}
-                            className="rounded-md bg-green-600 px-3 py-1 text-white hover:bg-green-700"
+                            className="rounded-md bg-green-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-green-700"
                           >
                             Reactivate
                           </button>

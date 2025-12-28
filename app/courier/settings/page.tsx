@@ -107,12 +107,12 @@ export default function CourierSettingsPage() {
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900">Courier Settings</h1>
-            <div className="flex gap-4">
+          <div className="flex h-16 flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-3 sm:py-0">
+            <h1 className="text-lg sm:text-xl font-semibold text-gray-900">Courier Settings</h1>
+            <div className="flex flex-wrap gap-2 sm:gap-4">
               <Link
                 href="/courier"
-                className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
+                className="rounded-md bg-gray-200 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-300"
               >
                 Back to Dashboard
               </Link>
@@ -121,9 +121,9 @@ export default function CourierSettingsPage() {
         </div>
       </nav>
 
-      <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="rounded-lg bg-white p-6 shadow">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6">Profile Settings</h2>
+      <main className="mx-auto max-w-2xl px-4 py-6 sm:py-8 sm:px-6 lg:px-8">
+        <div className="rounded-lg bg-white p-4 sm:p-6 shadow">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-4 sm:mb-6">Profile Settings</h2>
 
           {message && (
             <div

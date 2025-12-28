@@ -104,36 +104,36 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
-            <div className="flex gap-4">
+          <div className="flex lg:h-16 md:h-24 h-32 flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-3 sm:py-0">
+            <h1 className="text-lg sm:text-xl font-semibold text-gray-900">Settings</h1>
+            <div className="flex flex-wrap gap-2 sm:gap-4">
               <Link
                 href="/admin/dashboard"
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                className="rounded-md bg-blue-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-blue-700"
               >
                 Dashboard
               </Link>
               <Link
                 href="/admin"
-                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
               >
                 Customers
               </Link>
               <Link
                 href="/admin/logs"
-                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
               >
                 Call Logs
               </Link>
               <Link
                 href="/admin/guide"
-                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
               >
                 Guide
               </Link>
               <button
                 onClick={handleLogout}
-                className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
+                className="rounded-md bg-gray-200 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-300"
               >
                 Logout
               </button>
@@ -142,10 +142,10 @@ export default function SettingsPage() {
         </div>
       </nav>
 
-      <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
+      <main className="mx-auto max-w-4xl px-4 py-6 sm:py-8 sm:px-6 lg:px-8">
         <div className="mb-6">
-          <h2 className="text-2xl font-bold text-gray-900">System Settings</h2>
-          <p className="mt-1 text-sm text-gray-600">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">System Settings</h2>
+          <p className="mt-1 text-xs sm:text-sm text-gray-600">
             Configure system behavior and preferences
           </p>
         </div>
