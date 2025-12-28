@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
 import type { Customer } from '@/types/database'
 
@@ -12,6 +13,7 @@ export default function AdminPage() {
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
   const [formData, setFormData] = useState({ name: '', phone_number: '' })
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [resetting, setResetting] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -128,9 +130,62 @@ export default function AdminPage() {
     }
   }
 
+  const handleReactivate = async (customerId: string) => {
+    try {
+      const { error } = await supabase
+        .from('customers')
+        .update({ is_active: true })
+        .eq('id', customerId)
+
+      if (error) throw error
+      setMessage({ type: 'success', text: 'Customer reactivated successfully!' })
+      fetchCustomers()
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to reactivate customer' })
+    }
+  }
+
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  const handleReset = async () => {
+    if (!confirm('⚠️ WARNING: This will clear all customers and cannot be undone. Are you sure?')) {
+      return
+    }
+
+    setResetting(true)
+    setMessage(null)
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+
+      const response = await fetch('/api/admin/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          accessToken: session.access_token,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Reset failed')
+      }
+
+      setMessage({ type: 'success', text: 'Daily reset completed successfully!' })
+      fetchCustomers()
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to reset list' })
+    } finally {
+      setResetting(false)
+    }
   }
 
   const activeCustomers = customers.filter((c) => c.is_active)
@@ -148,13 +203,39 @@ export default function AdminPage() {
       <nav className="bg-white shadow-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900">Admin Dashboard</h1>
-            <button
-              onClick={handleLogout}
-              className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
-            >
-              Logout
-            </button>
+            <h1 className="text-xl font-semibold text-gray-900">Customer Management</h1>
+            <div className="flex gap-4">
+              <Link
+                href="/admin/dashboard"
+                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Dashboard
+              </Link>
+              <Link
+                href="/admin/logs"
+                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+              >
+                Call Logs
+              </Link>
+              <Link
+                href="/admin/settings"
+                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+              >
+                Settings
+              </Link>
+              <Link
+                href="/admin/testing"
+                className="rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+              >
+                Testing
+              </Link>
+              <button
+                onClick={handleLogout}
+                className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </nav>
@@ -167,16 +248,26 @@ export default function AdminPage() {
               Manage customers and their contact information
             </p>
           </div>
-          <button
-            onClick={() => {
-              setShowAddForm(!showAddForm)
-              setEditingCustomer(null)
-              setFormData({ name: '', phone_number: '' })
-            }}
-            className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-          >
-            {showAddForm ? 'Cancel' : 'Add Customer'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setShowAddForm(!showAddForm)
+                setEditingCustomer(null)
+                setFormData({ name: '', phone_number: '' })
+              }}
+              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+            >
+              {showAddForm ? 'Cancel' : 'Add Customer'}
+            </button>
+            <button
+              onClick={handleReset}
+              disabled={resetting}
+              className="rounded-md bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:bg-gray-400"
+              title="Reset daily list - clears all customers"
+            >
+              {resetting ? 'Resetting...' : 'Reset List'}
+            </button>
+          </div>
         </div>
 
         {message && (
@@ -247,9 +338,9 @@ export default function AdminPage() {
         )}
 
         <div className="mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Today's Active Customers</h3>
+          <h3 className="text-lg font-semibold text-gray-900">All Customers</h3>
           <p className="text-sm text-gray-600">
-            {activeCustomers.length} active customer{activeCustomers.length !== 1 ? 's' : ''}
+            {activeCustomers.length} active, {customers.length - activeCustomers.length} inactive
           </p>
         </div>
 
@@ -304,12 +395,19 @@ export default function AdminPage() {
                         >
                           Edit
                         </button>
-                        {customer.is_active && (
+                        {customer.is_active ? (
                           <button
                             onClick={() => handleDelete(customer.id)}
                             className="rounded-md bg-red-600 px-3 py-1 text-white hover:bg-red-700"
                           >
-                            Remove
+                            Deactivate
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleReactivate(customer.id)}
+                            className="rounded-md bg-green-600 px-3 py-1 text-white hover:bg-green-700"
+                          >
+                            Reactivate
                           </button>
                         )}
                       </div>

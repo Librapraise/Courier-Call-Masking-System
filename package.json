@@ -13,6 +13,7 @@
     "next": "16.0.10",
     "react": "19.2.1",
     "react-dom": "19.2.1",
+    "node-cron": "^3.0.3",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-react": "^5.31.0",
     "twilio": "^5.10.7",
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/node-cron": "^3.0.11",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/swagger-ui-react": "^5.18.0",

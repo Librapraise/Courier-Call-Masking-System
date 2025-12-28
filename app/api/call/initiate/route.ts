@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import twilio from 'twilio'
+import { retryOperation, maskPhoneNumber } from '@/lib/twilio/webhook'
 
 export async function POST(request: NextRequest) {
   try {
@@ -132,14 +133,15 @@ export async function POST(request: NextRequest) {
 
     // Validate webhook URL (Twilio requires publicly accessible URL)
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-    const webhookUrl = `${appUrl}/api/call/connect?customerPhone=${encodeURIComponent(customer.phone_number)}`
+    const connectWebhookUrl = `${appUrl}/api/call/connect?customerPhone=${encodeURIComponent(customer.phone_number)}&customerId=${customerId}&courierId=${user.id}`
+    const statusCallbackUrl = `${appUrl}/api/call/status`
     
     // Check if using localhost (Twilio can't reach localhost)
-    if (webhookUrl.includes('localhost') || webhookUrl.includes('127.0.0.1')) {
+    if (connectWebhookUrl.includes('localhost') || connectWebhookUrl.includes('127.0.0.1')) {
       return NextResponse.json(
         { 
           error: 'Twilio webhook URL must be publicly accessible. For local development, use ngrok or deploy to a public URL.',
-          details: 'Current URL: ' + webhookUrl
+          details: 'Current URL: ' + connectWebhookUrl
         },
         { status: 400 }
       )
@@ -148,22 +150,37 @@ export async function POST(request: NextRequest) {
     // Initialize Twilio client
     const client = twilio(accountSid, authToken)
 
-    // Initiate Twilio call
+    // Get agent name (courier email or profile name)
+    const agentName = courierProfile.email || `Courier ${courierProfile.id.slice(0, 8)}`
+
+    // Initiate Twilio call with retry logic
     // Call flow: Courier's phone → Twilio number → Customer's phone
     // We call the courier first, then connect them to the customer
     try {
-      const call = await client.calls.create({
-        to: courierPhoneNumber,
-        from: twilioPhoneNumber,
-        url: webhookUrl,
-        method: 'POST',
-      })
+      const call = await retryOperation(
+        () => client.calls.create({
+          to: courierPhoneNumber,
+          from: twilioPhoneNumber,
+          url: connectWebhookUrl,
+          method: 'POST',
+          statusCallback: statusCallbackUrl,
+          statusCallbackMethod: 'POST',
+          statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed', 'busy', 'no-answer', 'failed', 'canceled'],
+        }),
+        3, // max retries
+        1000 // initial delay
+      )
 
-      // Log call attempt
+      // Log comprehensive call information
       await supabaseAdmin.from('call_logs').insert({
         customer_id: customerId,
+        customer_name: customer.name,
+        customer_phone_masked: maskPhoneNumber(customer.phone_number),
         courier_id: user.id,
-        call_status: call.status || 'initiated',
+        agent_name: agentName,
+        call_status: 'attempted',
+        call_timestamp: new Date().toISOString(),
+        twilio_call_sid: call.sid,
       })
 
       return NextResponse.json({
@@ -174,15 +191,20 @@ export async function POST(request: NextRequest) {
     } catch (twilioError: any) {
       console.error('Twilio error:', twilioError)
 
-      // Log failed call attempt
+      // Log failed call attempt with error details
       await supabaseAdmin.from('call_logs').insert({
         customer_id: customerId,
+        customer_name: customer.name,
+        customer_phone_masked: maskPhoneNumber(customer.phone_number),
         courier_id: user.id,
-        call_status: `failed: ${twilioError.message}`,
+        agent_name: agentName,
+        call_status: 'failed',
+        call_timestamp: new Date().toISOString(),
+        error_message: twilioError.message || 'Failed to initiate call',
       })
 
       return NextResponse.json(
-        { error: `Failed to initiate call: ${twilioError.message}` },
+        { error: `Failed to initiate call: ${twilioError.message || 'Unknown error'}` },
         { status: 500 }
       )
     }
