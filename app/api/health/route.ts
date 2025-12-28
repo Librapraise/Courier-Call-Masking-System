@@ -19,7 +19,7 @@ export async function GET() {
     }
 
     // Test Twilio connection
-    if (checks.twilio_configured) {
+    if (checks.twilio_configured && accountSid && authToken) {
       try {
         const client = twilio(accountSid, authToken)
         // Try to fetch account info (lightweight operation)
