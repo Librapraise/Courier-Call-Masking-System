@@ -34,10 +34,10 @@ yarn-error.log*
 .env*
 
 # documentation files
-CLIENT_USER_GUIDE.md
-SETUP.md
-MILESTONE2_SETUP.md
-TROUBLESHOOTING.md
+.CLIENT_USER_GUIDE.md
+.SETUP.md
+.MILESTONE2_SETUP.md
+.TROUBLESHOOTING.md
 
 
 # vercel
