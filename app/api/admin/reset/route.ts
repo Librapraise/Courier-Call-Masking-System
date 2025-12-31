@@ -9,6 +9,7 @@ import { createClient } from '@supabase/supabase-js'
  * Can be triggered manually or by cron job
  */
 export async function POST(request: NextRequest) {
+  console.log('[API] /api/admin/reset - Daily reset request received')
   try {
     // Verify admin authentication
     let user = null
@@ -16,6 +17,8 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => ({}))
     const { accessToken } = body
+
+    console.log('[API] /api/admin/reset - Authentication check:', { hasAccessToken: !!accessToken })
 
     if (accessToken) {
       const supabaseWithToken = createClient(
@@ -54,7 +57,10 @@ export async function POST(request: NextRequest) {
     const cronSecret = request.headers.get('X-Cron-Secret')
     const isCronJob = cronSecret === process.env.CRON_SECRET
 
+    console.log('[API] /api/admin/reset - Request type:', isCronJob ? 'Cron job' : 'Manual request')
+
     if (!isCronJob && (authError || !user)) {
+      console.error('[API] /api/admin/reset - Unauthorized:', authError?.message || 'No user')
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -69,7 +75,10 @@ export async function POST(request: NextRequest) {
         .eq('id', user!.id)
         .single()
 
+      console.log('[API] /api/admin/reset - User role:', profile?.role)
+
       if (profile?.role !== 'admin') {
+        console.error('[API] /api/admin/reset - Unauthorized role:', profile?.role)
         return NextResponse.json(
           { error: 'Only admins can reset the list' },
           { status: 403 }
@@ -80,10 +89,14 @@ export async function POST(request: NextRequest) {
     const today = new Date()
     const archiveDate = today.toISOString().split('T')[0] // YYYY-MM-DD
 
+    console.log('[API] /api/admin/reset - Starting reset process for date:', archiveDate)
+
     // Step 1: Archive call logs
     const { data: callLogs } = await supabaseAdmin
       .from('call_logs')
       .select('*')
+
+    console.log('[API] /api/admin/reset - Found call logs to archive:', callLogs?.length || 0)
 
     if (callLogs && callLogs.length > 0) {
       const archivedCalls = callLogs.map(log => ({
@@ -101,23 +114,47 @@ export async function POST(request: NextRequest) {
         archive_date: archiveDate,
       }))
 
-      await supabaseAdmin.from('archived_calls').insert(archivedCalls)
+      const archiveResult = await supabaseAdmin.from('archived_calls').insert(archivedCalls)
+      if (archiveResult.error) {
+        console.error('[API] /api/admin/reset - Failed to archive calls:', archiveResult.error)
+      } else {
+        console.log('[API] /api/admin/reset - Successfully archived', archivedCalls.length, 'call logs')
+      }
     }
 
     // Step 2: Clear call logs
-    await supabaseAdmin.from('call_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    const deleteResult = await supabaseAdmin.from('call_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    if (deleteResult.error) {
+      console.error('[API] /api/admin/reset - Failed to clear call logs:', deleteResult.error)
+    } else {
+      console.log('[API] /api/admin/reset - Call logs cleared successfully')
+    }
 
     // Step 3: Deactivate all customers (soft delete)
-    await supabaseAdmin
+    const deactivateResult = await supabaseAdmin
       .from('customers')
       .update({ is_active: false })
       .eq('is_active', true)
 
+    if (deactivateResult.error) {
+      console.error('[API] /api/admin/reset - Failed to deactivate customers:', deactivateResult.error)
+    } else {
+      console.log('[API] /api/admin/reset - Customers deactivated successfully')
+    }
+
     // Step 4: Update last reset date in settings
-    await supabaseAdmin
+    const settingsResult = await supabaseAdmin
       .from('settings')
       .update({ value: archiveDate })
       .eq('key', 'last_reset_date')
+
+    if (settingsResult.error) {
+      console.error('[API] /api/admin/reset - Failed to update settings:', settingsResult.error)
+    } else {
+      console.log('[API] /api/admin/reset - Settings updated successfully')
+    }
+
+    console.log('[API] /api/admin/reset - Daily reset completed successfully')
 
     return NextResponse.json({
       success: true,
@@ -126,7 +163,7 @@ export async function POST(request: NextRequest) {
       reset_date: archiveDate,
     })
   } catch (error: any) {
-    console.error('Reset error:', error)
+    console.error('[API] /api/admin/reset - Reset error:', error.message || error)
     return NextResponse.json(
       { error: `Reset failed: ${error.message}` },
       { status: 500 }

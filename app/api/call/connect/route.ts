@@ -8,6 +8,7 @@ import { supabaseAdmin } from '@/lib/supabase/server'
  * When courier answers, connects them to the customer with caller ID masking
  */
 export async function POST(request: NextRequest) {
+  console.log('[API] /api/call/connect - Connect webhook called by Twilio')
   try {
     // Note: This webhook is called by Twilio as part of our controlled call flow
     // Validation is handled in incoming/status webhooks which receive external requests
@@ -17,7 +18,10 @@ export async function POST(request: NextRequest) {
     const customerId = searchParams.get('customerId')
     const courierId = searchParams.get('courierId')
 
+    console.log('[API] /api/call/connect - Webhook parameters:', { customerId, courierId, hasCustomerPhone: !!customerPhone })
+
     if (!customerPhone) {
+      console.error('[API] /api/call/connect - Missing customer phone number')
       return NextResponse.json({ error: 'Customer phone number required' }, { status: 400 })
     }
 
@@ -29,6 +33,12 @@ export async function POST(request: NextRequest) {
       .single()
 
     const businessPhone = setting?.value || process.env.TWILIO_PHONE_NUMBER
+
+    console.log('[API] /api/call/connect - Connecting call:', {
+      customerPhone,
+      businessPhone,
+      callerId: businessPhone
+    })
 
     // TwiML to connect the call
     // When courier answers, connect them to the customer
@@ -42,6 +52,7 @@ export async function POST(request: NextRequest) {
     })
     dial.number(customerPhone)
 
+    console.log('[API] /api/call/connect - TwiML generated, connecting courier to customer')
     return new NextResponse(twiml.toString(), {
       status: 200,
       headers: {
@@ -49,7 +60,7 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (error: any) {
-    console.error('Error in connect webhook:', error)
+    console.error('[API] /api/call/connect - Error in connect webhook:', error.message || error)
     
     // Return error TwiML
     const twiml = new twilio.twiml.VoiceResponse()

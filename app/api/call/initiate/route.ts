@@ -6,6 +6,7 @@ import twilio from 'twilio'
 import { retryOperation, maskPhoneNumber } from '@/lib/twilio/webhook'
 
 export async function POST(request: NextRequest) {
+  console.log('[API] /api/call/initiate - Call initiation request received')
   try {
     // Validate Twilio environment variables
     const accountSid = process.env.TWILIO_ACCOUNT_SID
@@ -13,6 +14,7 @@ export async function POST(request: NextRequest) {
     const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER
 
     if (!accountSid || !authToken || !twilioPhoneNumber) {
+      console.error('[API] /api/call/initiate - Twilio configuration missing')
       return NextResponse.json(
         { error: 'Twilio configuration is missing. Please check environment variables.' },
         { status: 500 }
@@ -22,7 +24,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { customerId, accessToken } = body
 
+    console.log('[API] /api/call/initiate - Request body:', { customerId, hasAccessToken: !!accessToken })
+
     if (!customerId) {
+      console.error('[API] /api/call/initiate - Missing customerId parameter')
       return NextResponse.json(
         { error: 'Missing required parameter: customerId' },
         { status: 400 }
@@ -71,12 +76,14 @@ export async function POST(request: NextRequest) {
     }
     
     if (authError || !user) {
-      console.error('Auth error:', authError?.message || 'No user found', 'Has token:', !!accessToken)
+      console.error('[API] /api/call/initiate - Auth error:', authError?.message || 'No user found', 'Has token:', !!accessToken)
       return NextResponse.json(
         { error: 'Unauthorized - Please log in', details: authError?.message || 'Session not found' },
         { status: 401 }
       )
     }
+
+    console.log('[API] /api/call/initiate - User authenticated:', { userId: user.id, email: user.email })
 
 
     // Verify courier is authenticated and get their profile
@@ -87,13 +94,17 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (courierError || !courierProfile) {
+      console.error('[API] /api/call/initiate - Profile not found:', courierError?.message)
       return NextResponse.json(
         { error: 'User profile not found' },
         { status: 401 }
       )
     }
 
+    console.log('[API] /api/call/initiate - Courier profile retrieved:', { role: courierProfile.role, email: courierProfile.email })
+
     if (courierProfile.role !== 'courier') {
+      console.error('[API] /api/call/initiate - Unauthorized role:', courierProfile.role)
       return NextResponse.json(
         { error: 'Only couriers can initiate calls' },
         { status: 403 }
@@ -118,13 +129,17 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (customerError || !customer) {
+      console.error('[API] /api/call/initiate - Customer not found:', customerError?.message)
       return NextResponse.json(
         { error: 'Customer not found' },
         { status: 404 }
       )
     }
 
+    console.log('[API] /api/call/initiate - Customer retrieved:', { customerId: customer.id, name: customer.name, isActive: customer.is_active })
+
     if (!customer.is_active) {
+      console.error('[API] /api/call/initiate - Customer is inactive')
       return NextResponse.json(
         { error: 'Customer is inactive' },
         { status: 400 }
@@ -138,6 +153,7 @@ export async function POST(request: NextRequest) {
     
     // Check if using localhost (Twilio can't reach localhost)
     if (connectWebhookUrl.includes('localhost') || connectWebhookUrl.includes('127.0.0.1')) {
+      console.error('[API] /api/call/initiate - Invalid webhook URL (localhost):', connectWebhookUrl)
       return NextResponse.json(
         { 
           error: 'Twilio webhook URL must be publicly accessible. For local development, use ngrok or deploy to a public URL.',
@@ -147,11 +163,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    console.log('[API] /api/call/initiate - Webhook URLs configured:', { connectWebhookUrl, statusCallbackUrl })
+
     // Initialize Twilio client
     const client = twilio(accountSid, authToken)
 
     // Get agent name (courier email or profile name)
     const agentName = courierProfile.email || `Courier ${courierProfile.id.slice(0, 8)}`
+
+    console.log('[API] /api/call/initiate - Initiating Twilio call:', {
+      to: courierPhoneNumber,
+      from: twilioPhoneNumber,
+      customerName: customer.name,
+      agentName
+    })
 
     // Initiate Twilio call with retry logic
     // Call flow: Courier's phone → Twilio number → Customer's phone
@@ -171,8 +196,10 @@ export async function POST(request: NextRequest) {
         1000 // initial delay
       )
 
+      console.log('[API] /api/call/initiate - Twilio call created successfully:', { callSid: call.sid, status: call.status })
+
       // Log comprehensive call information
-      await supabaseAdmin.from('call_logs').insert({
+      const logResult = await supabaseAdmin.from('call_logs').insert({
         customer_id: customerId,
         customer_name: customer.name,
         customer_phone_masked: maskPhoneNumber(customer.phone_number),
@@ -183,16 +210,23 @@ export async function POST(request: NextRequest) {
         twilio_call_sid: call.sid,
       })
 
+      if (logResult.error) {
+        console.error('[API] /api/call/initiate - Failed to log call:', logResult.error)
+      } else {
+        console.log('[API] /api/call/initiate - Call logged to database successfully')
+      }
+
+      console.log('[API] /api/call/initiate - Call initiation completed successfully')
       return NextResponse.json({
         success: true,
         callSid: call.sid,
         message: 'Call initiated successfully',
       })
     } catch (twilioError: any) {
-      console.error('Twilio error:', twilioError)
+      console.error('[API] /api/call/initiate - Twilio error:', twilioError.message || twilioError)
 
       // Log failed call attempt with error details
-      await supabaseAdmin.from('call_logs').insert({
+      const logResult = await supabaseAdmin.from('call_logs').insert({
         customer_id: customerId,
         customer_name: customer.name,
         customer_phone_masked: maskPhoneNumber(customer.phone_number),
@@ -203,13 +237,17 @@ export async function POST(request: NextRequest) {
         error_message: twilioError.message || 'Failed to initiate call',
       })
 
+      if (logResult.error) {
+        console.error('[API] /api/call/initiate - Failed to log failed call:', logResult.error)
+      }
+
       return NextResponse.json(
         { error: `Failed to initiate call: ${twilioError.message || 'Unknown error'}` },
         { status: 500 }
       )
     }
   } catch (error: any) {
-    console.error('API error:', error)
+    console.error('[API] /api/call/initiate - Unexpected error:', error.message || error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

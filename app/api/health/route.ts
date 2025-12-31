@@ -6,6 +6,7 @@ import twilio from 'twilio'
  * Verifies Twilio connection and system status
  */
 export async function GET() {
+  console.log('[API] /api/health - Health check requested')
   try {
     const accountSid = process.env.TWILIO_ACCOUNT_SID
     const authToken = process.env.TWILIO_AUTH_TOKEN
@@ -18,6 +19,8 @@ export async function GET() {
       timestamp: new Date().toISOString(),
     }
 
+    console.log('[API] /api/health - Twilio configuration check:', checks.twilio_configured)
+
     // Test Twilio connection
     if (checks.twilio_configured && accountSid && authToken) {
       try {
@@ -25,8 +28,9 @@ export async function GET() {
         // Try to fetch account info (lightweight operation)
         await client.api.accounts(accountSid).fetch()
         checks.twilio_connected = true
+        console.log('[API] /api/health - Twilio connection test: SUCCESS')
       } catch (error) {
-        console.error('Twilio connection test failed:', error)
+        console.error('[API] /api/health - Twilio connection test failed:', error)
         checks.twilio_connected = false
       }
     }
@@ -36,18 +40,28 @@ export async function GET() {
       const { supabaseAdmin } = await import('@/lib/supabase/server')
       const { error } = await supabaseAdmin.from('settings').select('key').limit(1)
       checks.database_connected = !error
+      if (error) {
+        console.error('[API] /api/health - Database connection test failed:', error)
+      } else {
+        console.log('[API] /api/health - Database connection test: SUCCESS')
+      }
     } catch (error) {
-      console.error('Database connection test failed:', error)
+      console.error('[API] /api/health - Database connection test failed:', error)
       checks.database_connected = false
     }
 
     const isHealthy = checks.twilio_configured && checks.twilio_connected && checks.database_connected
 
+    console.log('[API] /api/health - Health check completed:', {
+      isHealthy,
+      checks
+    })
+
     return NextResponse.json(checks, {
       status: isHealthy ? 200 : 503,
     })
   } catch (error: any) {
-    console.error('Health check error:', error)
+    console.error('[API] /api/health - Health check error:', error.message || error)
     return NextResponse.json(
       {
         error: 'Health check failed',
