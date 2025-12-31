@@ -4,22 +4,9 @@ import { validateTwilioWebhook } from '@/lib/twilio/webhook'
 import { supabaseAdmin } from '@/lib/supabase/server'
 
 /**
- * Handles the call connection webhook
- * When courier answers, connects them to the customer with caller ID masking
+ * Shared logic for handling connect webhook (both GET and POST)
  */
-export async function GET(request: NextRequest) {
-  // Handle GET requests (health checks, monitoring tools, etc.)
-  // Return 200 to avoid cluttering logs with 405 errors
-  return new NextResponse('This endpoint accepts POST requests from Twilio only.', {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/plain',
-      'Allow': 'POST'
-    }
-  })
-}
-
-export async function POST(request: NextRequest) {
+async function handleConnectWebhook(request: NextRequest) {
   console.log('[API] /api/call/connect - Connect webhook called by Twilio')
   console.log('[API] /api/call/connect - Request URL:', request.url)
   console.log('[API] /api/call/connect - Request method:', request.method)
@@ -28,9 +15,6 @@ export async function POST(request: NextRequest) {
   let twiml: twilio.twiml.VoiceResponse
   
   try {
-    // Note: This webhook is called by Twilio as part of our controlled call flow
-    // Validation is handled in incoming/status webhooks which receive external requests
-
     // Use request.nextUrl for proper URL parsing in Next.js
     const customerPhone = request.nextUrl.searchParams.get('customerPhone')
     const customerId = request.nextUrl.searchParams.get('customerId')
@@ -71,7 +55,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Get business phone number from settings or env
-    // Use timeout to prevent hanging on database queries
     let businessPhone = process.env.TWILIO_PHONE_NUMBER
     
     if (!businessPhone) {
@@ -172,5 +155,22 @@ export async function POST(request: NextRequest) {
       )
     }
   }
+}
+
+/**
+ * Handles the call connection webhook
+ * When courier answers, connects them to the customer with caller ID masking
+ */
+export async function GET(request: NextRequest) {
+  // Handle GET requests - Twilio might call with GET in some cases
+  // Process the same way as POST
+  console.log('[API] /api/call/connect - GET request received (processing as POST)')
+  return handleConnectWebhook(request)
+}
+
+export async function POST(request: NextRequest) {
+  // Note: This webhook is called by Twilio as part of our controlled call flow
+  // Validation is handled in incoming/status webhooks which receive external requests
+  return handleConnectWebhook(request)
 }
 
