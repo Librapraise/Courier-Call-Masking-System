@@ -6,6 +6,17 @@ import { supabaseAdmin } from '@/lib/supabase/server'
  * Handles Twilio call status callbacks
  * Updates call logs when call status changes (ringing, in-progress, completed, failed, etc.)
  */
+export async function GET(request: NextRequest) {
+  // Handle GET requests (some monitoring tools or browsers might try GET)
+  console.log('[API] /api/call/status - GET request received (status endpoint only accepts POST)')
+  return new NextResponse('Method not allowed. This endpoint only accepts POST requests from Twilio.', { 
+    status: 405,
+    headers: {
+      'Allow': 'POST'
+    }
+  })
+}
+
 export async function POST(request: NextRequest) {
   console.log('[API] /api/call/status - Status callback received from Twilio')
   try {

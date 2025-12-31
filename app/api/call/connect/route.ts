@@ -22,17 +22,51 @@ export async function POST(request: NextRequest) {
 
     if (!customerPhone) {
       console.error('[API] /api/call/connect - Missing customer phone number')
-      return NextResponse.json({ error: 'Customer phone number required' }, { status: 400 })
+      // Return TwiML error response instead of JSON
+      const twiml = new twilio.twiml.VoiceResponse()
+      twiml.say('Sorry, there was an error connecting your call. The customer phone number is missing.')
+      twiml.hangup()
+      return new NextResponse(twiml.toString(), {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/xml',
+        },
+      })
     }
 
     // Get business phone number from settings or env
-    const { data: setting } = await supabaseAdmin
-      .from('settings')
-      .select('value')
-      .eq('key', 'business_phone_number')
-      .single()
+    let businessPhone = process.env.TWILIO_PHONE_NUMBER
+    
+    try {
+      const { data: setting, error: settingError } = await supabaseAdmin
+        .from('settings')
+        .select('value')
+        .eq('key', 'business_phone_number')
+        .single()
 
-    const businessPhone = setting?.value || process.env.TWILIO_PHONE_NUMBER
+      if (!settingError && setting?.value) {
+        businessPhone = setting.value
+        console.log('[API] /api/call/connect - Business phone from settings:', businessPhone)
+      } else {
+        console.log('[API] /api/call/connect - Using business phone from env:', businessPhone)
+      }
+    } catch (error) {
+      console.error('[API] /api/call/connect - Error fetching settings, using env fallback:', error)
+      // Continue with env variable fallback
+    }
+
+    if (!businessPhone) {
+      console.error('[API] /api/call/connect - Business phone number not configured')
+      const twiml = new twilio.twiml.VoiceResponse()
+      twiml.say('Sorry, there was an error connecting your call. The system is not properly configured.')
+      twiml.hangup()
+      return new NextResponse(twiml.toString(), {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/xml',
+        },
+      })
+    }
 
     console.log('[API] /api/call/connect - Connecting call:', {
       customerPhone,
@@ -52,8 +86,11 @@ export async function POST(request: NextRequest) {
     })
     dial.number(customerPhone)
 
-    console.log('[API] /api/call/connect - TwiML generated, connecting courier to customer')
-    return new NextResponse(twiml.toString(), {
+    const twimlString = twiml.toString()
+    console.log('[API] /api/call/connect - TwiML generated successfully:', twimlString)
+    console.log('[API] /api/call/connect - Connecting courier to customer')
+    
+    return new NextResponse(twimlString, {
       status: 200,
       headers: {
         'Content-Type': 'text/xml',
