@@ -7,9 +7,22 @@ import { supabaseAdmin } from '@/lib/supabase/server'
  * Shared logic for handling connect webhook (both GET and POST)
  */
 async function handleConnectWebhook(request: NextRequest) {
-  console.log('[API] /api/call/connect - Connect webhook called by Twilio')
-  console.log('[API] /api/call/connect - Request URL:', request.url)
-  console.log('[API] /api/call/connect - Request method:', request.method)
+  const timestamp = new Date().toISOString()
+  console.log(`[API] /api/call/connect [${timestamp}] - Connect webhook called by Twilio`)
+  console.log(`[API] /api/call/connect [${timestamp}] - Request URL:`, request.url)
+  console.log(`[API] /api/call/connect [${timestamp}] - Request method:`, request.method)
+  
+  // Log request headers for debugging
+  const headers: Record<string, string> = {}
+  request.headers.forEach((value, key) => {
+    // Mask sensitive headers
+    if (key.toLowerCase().includes('auth') || key.toLowerCase().includes('token')) {
+      headers[key] = '***MASKED***'
+    } else {
+      headers[key] = value
+    }
+  })
+  console.log(`[API] /api/call/connect [${timestamp}] - Request headers:`, JSON.stringify(headers))
   
   // Always return TwiML, even on errors, to prevent Twilio from playing "application error"
   let twiml: twilio.twiml.VoiceResponse
@@ -20,10 +33,11 @@ async function handleConnectWebhook(request: NextRequest) {
     const customerId = request.nextUrl.searchParams.get('customerId')
     const courierId = request.nextUrl.searchParams.get('courierId')
 
-    console.log('[API] /api/call/connect - Webhook parameters:', { 
+    console.log(`[API] /api/call/connect [${timestamp}] - Webhook parameters:`, { 
       customerId, 
       courierId, 
       hasCustomerPhone: !!customerPhone,
+      customerPhoneLength: customerPhone?.length || 0,
       customerPhone: customerPhone ? `${customerPhone.substring(0, 4)}****` : null // Log masked phone
     })
 
@@ -41,12 +55,30 @@ async function handleConnectWebhook(request: NextRequest) {
     }
 
     // Validate phone number format (E.164)
+    const phoneRegex = /^\+[1-9]\d{1,14}$/
     if (!customerPhone.startsWith('+')) {
-      console.error('[API] /api/call/connect - Invalid phone number format (must be E.164):', customerPhone)
+      console.error(`[API] /api/call/connect [${timestamp}] - Invalid phone number format (must start with +):`, customerPhone.substring(0, 10) + '****')
       twiml = new twilio.twiml.VoiceResponse()
       twiml.say('Sorry, there was an error connecting your call. Invalid phone number format.')
       twiml.hangup()
-      return new NextResponse(twiml.toString(), {
+      const errorTwiml = twiml.toString()
+      console.log(`[API] /api/call/connect [${timestamp}] - Returning error TwiML:`, errorTwiml)
+      return new NextResponse(errorTwiml, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/xml; charset=utf-8',
+        },
+      })
+    }
+    
+    if (!phoneRegex.test(customerPhone)) {
+      console.error(`[API] /api/call/connect [${timestamp}] - Invalid phone number format (must be E.164):`, customerPhone.substring(0, 10) + '****')
+      twiml = new twilio.twiml.VoiceResponse()
+      twiml.say('Sorry, there was an error connecting your call. Invalid phone number format.')
+      twiml.hangup()
+      const errorTwiml = twiml.toString()
+      console.log(`[API] /api/call/connect [${timestamp}] - Returning error TwiML:`, errorTwiml)
+      return new NextResponse(errorTwiml, {
         status: 200,
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
@@ -83,11 +115,33 @@ async function handleConnectWebhook(request: NextRequest) {
     }
 
     if (!businessPhone) {
-      console.error('[API] /api/call/connect - Business phone number not configured')
+      console.error(`[API] /api/call/connect [${timestamp}] - Business phone number not configured`)
+      console.error(`[API] /api/call/connect [${timestamp}] - Environment check:`, {
+        hasTwilioPhoneNumber: !!process.env.TWILIO_PHONE_NUMBER,
+        nodeEnv: process.env.NODE_ENV
+      })
       twiml = new twilio.twiml.VoiceResponse()
       twiml.say('Sorry, there was an error connecting your call. The system is not properly configured.')
       twiml.hangup()
-      return new NextResponse(twiml.toString(), {
+      const errorTwiml = twiml.toString()
+      console.log(`[API] /api/call/connect [${timestamp}] - Returning error TwiML:`, errorTwiml)
+      return new NextResponse(errorTwiml, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/xml; charset=utf-8',
+        },
+      })
+    }
+    
+    // Validate business phone number format
+    if (!phoneRegex.test(businessPhone)) {
+      console.error(`[API] /api/call/connect [${timestamp}] - Invalid business phone number format:`, businessPhone.substring(0, 10) + '****')
+      twiml = new twilio.twiml.VoiceResponse()
+      twiml.say('Sorry, there was an error connecting your call. Invalid system configuration.')
+      twiml.hangup()
+      const errorTwiml = twiml.toString()
+      console.log(`[API] /api/call/connect [${timestamp}] - Returning error TwiML:`, errorTwiml)
+      return new NextResponse(errorTwiml, {
         status: 200,
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
@@ -115,9 +169,16 @@ async function handleConnectWebhook(request: NextRequest) {
     dial.number(customerPhone)
 
     const twimlString = twiml.toString()
-    console.log('[API] /api/call/connect - TwiML generated successfully')
-    console.log('[API] /api/call/connect - TwiML length:', twimlString.length, 'characters')
-    console.log('[API] /api/call/connect - Connecting courier to customer')
+    console.log(`[API] /api/call/connect [${timestamp}] - TwiML generated successfully`)
+    console.log(`[API] /api/call/connect [${timestamp}] - TwiML length:`, twimlString.length, 'characters')
+    console.log(`[API] /api/call/connect [${timestamp}] - TwiML content:`, twimlString)
+    console.log(`[API] /api/call/connect [${timestamp}] - Connecting courier to customer`)
+    console.log(`[API] /api/call/connect [${timestamp}] - Call configuration:`, {
+      customerPhoneFormat: 'E.164 ✓',
+      businessPhoneFormat: 'E.164 ✓',
+      dialTimeout: '30 seconds',
+      callerIdMasking: 'enabled'
+    })
     
     return new NextResponse(twimlString, {
       status: 200,
@@ -126,8 +187,12 @@ async function handleConnectWebhook(request: NextRequest) {
       },
     })
   } catch (error: any) {
-    console.error('[API] /api/call/connect - Unexpected error in connect webhook:', error)
-    console.error('[API] /api/call/connect - Error stack:', error.stack)
+    const errorTimestamp = new Date().toISOString()
+    console.error(`[API] /api/call/connect [${errorTimestamp}] - Unexpected error in connect webhook:`)
+    console.error(`[API] /api/call/connect [${errorTimestamp}] - Error type:`, error?.constructor?.name || 'Unknown')
+    console.error(`[API] /api/call/connect [${errorTimestamp}] - Error message:`, error?.message || error)
+    console.error(`[API] /api/call/connect [${errorTimestamp}] - Error stack:`, error?.stack)
+    console.error(`[API] /api/call/connect [${errorTimestamp}] - Full error object:`, JSON.stringify(error, Object.getOwnPropertyNames(error)))
     
     // Always return valid TwiML, even on unexpected errors
     try {
@@ -135,7 +200,10 @@ async function handleConnectWebhook(request: NextRequest) {
       twiml.say('Sorry, there was an error connecting your call. Please try again later.')
       twiml.hangup()
       
-      return new NextResponse(twiml.toString(), {
+      const errorTwiml = twiml.toString()
+      console.log(`[API] /api/call/connect [${errorTimestamp}] - Returning error TwiML:`, errorTwiml)
+      
+      return new NextResponse(errorTwiml, {
         status: 200,
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
@@ -143,16 +211,15 @@ async function handleConnectWebhook(request: NextRequest) {
       })
     } catch (twimlError: any) {
       // Last resort - return minimal valid TwiML
-      console.error('[API] /api/call/connect - Failed to generate error TwiML:', twimlError)
-      return new NextResponse(
-        '<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, there was an error.</Say><Hangup/></Response>',
-        {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/xml; charset=utf-8',
-          },
-        }
-      )
+      console.error(`[API] /api/call/connect [${errorTimestamp}] - Failed to generate error TwiML:`, twimlError)
+      const fallbackTwiml = '<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, there was an error.</Say><Hangup/></Response>'
+      console.log(`[API] /api/call/connect [${errorTimestamp}] - Returning fallback TwiML:`, fallbackTwiml)
+      return new NextResponse(fallbackTwiml, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/xml; charset=utf-8',
+        },
+      })
     }
   }
 }

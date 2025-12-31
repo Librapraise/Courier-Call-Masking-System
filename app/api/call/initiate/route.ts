@@ -114,9 +114,26 @@ export async function POST(request: NextRequest) {
     // Get courier's phone number from profile
     const courierPhoneNumber = courierProfile.phone_number || process.env.COURIER_PHONE_NUMBER
     
+    console.log('[API] /api/call/initiate - Courier phone number source:', {
+      fromProfile: !!courierProfile.phone_number,
+      fromEnv: !!process.env.COURIER_PHONE_NUMBER,
+      hasPhoneNumber: !!courierPhoneNumber
+    })
+    
     if (!courierPhoneNumber) {
+      console.error('[API] /api/call/initiate - Courier phone number not configured')
       return NextResponse.json(
         { error: 'Courier phone number not configured' },
+        { status: 400 }
+      )
+    }
+    
+    // Validate courier phone number format (E.164)
+    const phoneRegex = /^\+[1-9]\d{1,14}$/
+    if (!phoneRegex.test(courierPhoneNumber)) {
+      console.error('[API] /api/call/initiate - Invalid courier phone number format (must be E.164):', courierPhoneNumber.substring(0, 10) + '****')
+      return NextResponse.json(
+        { error: 'Courier phone number must be in E.164 format (e.g., +1234567890)' },
         { status: 400 }
       )
     }
@@ -136,7 +153,22 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log('[API] /api/call/initiate - Customer retrieved:', { customerId: customer.id, name: customer.name, isActive: customer.is_active })
+    console.log('[API] /api/call/initiate - Customer retrieved:', { 
+      customerId: customer.id, 
+      name: customer.name, 
+      isActive: customer.is_active,
+      hasPhoneNumber: !!customer.phone_number,
+      phoneNumberLength: customer.phone_number?.length || 0
+    })
+    
+    // Validate customer phone number format
+    if (customer.phone_number && !phoneRegex.test(customer.phone_number)) {
+      console.error('[API] /api/call/initiate - Invalid customer phone number format:', customer.phone_number.substring(0, 10) + '****')
+      return NextResponse.json(
+        { error: 'Customer phone number is not in valid E.164 format' },
+        { status: 400 }
+      )
+    }
 
     if (!customer.is_active) {
       console.error('[API] /api/call/initiate - Customer is inactive')
@@ -163,7 +195,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log('[API] /api/call/initiate - Webhook URLs configured:', { connectWebhookUrl, statusCallbackUrl })
+    console.log('[API] /api/call/initiate - Webhook URLs configured:', { 
+      connectWebhookUrl, 
+      statusCallbackUrl,
+      appUrl: appUrl,
+      isProduction: process.env.NODE_ENV === 'production'
+    })
+    
+    // Validate webhook URL is HTTPS in production
+    if (process.env.NODE_ENV === 'production' && !connectWebhookUrl.startsWith('https://')) {
+      console.error('[API] /api/call/initiate - Webhook URL must use HTTPS in production:', connectWebhookUrl)
+      return NextResponse.json(
+        { error: 'Webhook URL must use HTTPS in production' },
+        { status: 400 }
+      )
+    }
 
     // Initialize Twilio client
     const client = twilio(accountSid, authToken)
@@ -196,7 +242,16 @@ export async function POST(request: NextRequest) {
         1000 // initial delay
       )
 
-      console.log('[API] /api/call/initiate - Twilio call created successfully:', { callSid: call.sid, status: call.status })
+      console.log('[API] /api/call/initiate - Twilio call created successfully:', { 
+        callSid: call.sid, 
+        status: call.status,
+        direction: call.direction,
+        from: call.from,
+        to: call.to,
+        price: call.price,
+        priceUnit: call.priceUnit
+      })
+      console.log('[API] /api/call/initiate - Webhook URL that will be called:', connectWebhookUrl)
 
       // Log comprehensive call information
       const logResult = await supabaseAdmin.from('call_logs').insert({
