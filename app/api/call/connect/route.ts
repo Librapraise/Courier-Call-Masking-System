@@ -7,109 +7,170 @@ import { supabaseAdmin } from '@/lib/supabase/server'
  * Handles the call connection webhook
  * When courier answers, connects them to the customer with caller ID masking
  */
+export async function GET(request: NextRequest) {
+  // Handle GET requests (health checks, monitoring tools, etc.)
+  // Return 200 to avoid cluttering logs with 405 errors
+  return new NextResponse('This endpoint accepts POST requests from Twilio only.', {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/plain',
+      'Allow': 'POST'
+    }
+  })
+}
+
 export async function POST(request: NextRequest) {
   console.log('[API] /api/call/connect - Connect webhook called by Twilio')
+  console.log('[API] /api/call/connect - Request URL:', request.url)
+  console.log('[API] /api/call/connect - Request method:', request.method)
+  
+  // Always return TwiML, even on errors, to prevent Twilio from playing "application error"
+  let twiml: twilio.twiml.VoiceResponse
+  
   try {
     // Note: This webhook is called by Twilio as part of our controlled call flow
     // Validation is handled in incoming/status webhooks which receive external requests
 
-    const { searchParams } = new URL(request.url)
-    const customerPhone = searchParams.get('customerPhone')
-    const customerId = searchParams.get('customerId')
-    const courierId = searchParams.get('courierId')
+    // Use request.nextUrl for proper URL parsing in Next.js
+    const customerPhone = request.nextUrl.searchParams.get('customerPhone')
+    const customerId = request.nextUrl.searchParams.get('customerId')
+    const courierId = request.nextUrl.searchParams.get('courierId')
 
-    console.log('[API] /api/call/connect - Webhook parameters:', { customerId, courierId, hasCustomerPhone: !!customerPhone })
+    console.log('[API] /api/call/connect - Webhook parameters:', { 
+      customerId, 
+      courierId, 
+      hasCustomerPhone: !!customerPhone,
+      customerPhone: customerPhone ? `${customerPhone.substring(0, 4)}****` : null // Log masked phone
+    })
 
     if (!customerPhone) {
       console.error('[API] /api/call/connect - Missing customer phone number')
-      // Return TwiML error response instead of JSON
-      const twiml = new twilio.twiml.VoiceResponse()
+      twiml = new twilio.twiml.VoiceResponse()
       twiml.say('Sorry, there was an error connecting your call. The customer phone number is missing.')
       twiml.hangup()
       return new NextResponse(twiml.toString(), {
         status: 200,
         headers: {
-          'Content-Type': 'text/xml',
+          'Content-Type': 'text/xml; charset=utf-8',
+        },
+      })
+    }
+
+    // Validate phone number format (E.164)
+    if (!customerPhone.startsWith('+')) {
+      console.error('[API] /api/call/connect - Invalid phone number format (must be E.164):', customerPhone)
+      twiml = new twilio.twiml.VoiceResponse()
+      twiml.say('Sorry, there was an error connecting your call. Invalid phone number format.')
+      twiml.hangup()
+      return new NextResponse(twiml.toString(), {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/xml; charset=utf-8',
         },
       })
     }
 
     // Get business phone number from settings or env
+    // Use timeout to prevent hanging on database queries
     let businessPhone = process.env.TWILIO_PHONE_NUMBER
     
+    if (!businessPhone) {
+      console.error('[API] /api/call/connect - TWILIO_PHONE_NUMBER not set in environment')
+    } else {
+      console.log('[API] /api/call/connect - Business phone from env:', businessPhone)
+    }
+    
+    // Try to get from settings, but don't fail if it times out or errors
     try {
-      const { data: setting, error: settingError } = await supabaseAdmin
+      const settingsResult = await supabaseAdmin
         .from('settings')
         .select('value')
         .eq('key', 'business_phone_number')
         .single()
 
-      if (!settingError && setting?.value) {
-        businessPhone = setting.value
+      if (!settingsResult.error && settingsResult.data?.value) {
+        businessPhone = settingsResult.data.value
         console.log('[API] /api/call/connect - Business phone from settings:', businessPhone)
-      } else {
-        console.log('[API] /api/call/connect - Using business phone from env:', businessPhone)
+      } else if (settingsResult.error) {
+        console.warn('[API] /api/call/connect - Settings query error (non-critical):', settingsResult.error.message)
       }
-    } catch (error) {
-      console.error('[API] /api/call/connect - Error fetching settings, using env fallback:', error)
-      // Continue with env variable fallback
+    } catch (error: any) {
+      // Non-critical error - continue with env variable
+      console.warn('[API] /api/call/connect - Could not fetch settings, using env fallback:', error.message || error)
     }
 
     if (!businessPhone) {
       console.error('[API] /api/call/connect - Business phone number not configured')
-      const twiml = new twilio.twiml.VoiceResponse()
+      twiml = new twilio.twiml.VoiceResponse()
       twiml.say('Sorry, there was an error connecting your call. The system is not properly configured.')
       twiml.hangup()
       return new NextResponse(twiml.toString(), {
         status: 200,
         headers: {
-          'Content-Type': 'text/xml',
+          'Content-Type': 'text/xml; charset=utf-8',
         },
       })
     }
 
     console.log('[API] /api/call/connect - Connecting call:', {
-      customerPhone,
-      businessPhone,
+      customerPhone: `${customerPhone.substring(0, 4)}****`,
+      businessPhone: `${businessPhone.substring(0, 4)}****`,
       callerId: businessPhone
     })
 
     // TwiML to connect the call
     // When courier answers, connect them to the customer
-    const twiml = new twilio.twiml.VoiceResponse()
+    twiml = new twilio.twiml.VoiceResponse()
     
     // Dial the customer's phone number with caller ID masking
     // Customer will see the business number, not the courier's real number
     const dial = twiml.dial({
       callerId: businessPhone, // Mask caller ID to show business number
       record: 'do-not-record', // Don't record calls by default
+      timeout: 30, // Wait up to 30 seconds for answer
     })
     dial.number(customerPhone)
 
     const twimlString = twiml.toString()
-    console.log('[API] /api/call/connect - TwiML generated successfully:', twimlString)
+    console.log('[API] /api/call/connect - TwiML generated successfully')
+    console.log('[API] /api/call/connect - TwiML length:', twimlString.length, 'characters')
     console.log('[API] /api/call/connect - Connecting courier to customer')
     
     return new NextResponse(twimlString, {
       status: 200,
       headers: {
-        'Content-Type': 'text/xml',
+        'Content-Type': 'text/xml; charset=utf-8',
       },
     })
   } catch (error: any) {
-    console.error('[API] /api/call/connect - Error in connect webhook:', error.message || error)
+    console.error('[API] /api/call/connect - Unexpected error in connect webhook:', error)
+    console.error('[API] /api/call/connect - Error stack:', error.stack)
     
-    // Return error TwiML
-    const twiml = new twilio.twiml.VoiceResponse()
-    twiml.say('Sorry, there was an error connecting your call.')
-    twiml.hangup()
-    
-    return new NextResponse(twiml.toString(), {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/xml',
-      },
-    })
+    // Always return valid TwiML, even on unexpected errors
+    try {
+      twiml = new twilio.twiml.VoiceResponse()
+      twiml.say('Sorry, there was an error connecting your call. Please try again later.')
+      twiml.hangup()
+      
+      return new NextResponse(twiml.toString(), {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/xml; charset=utf-8',
+        },
+      })
+    } catch (twimlError: any) {
+      // Last resort - return minimal valid TwiML
+      console.error('[API] /api/call/connect - Failed to generate error TwiML:', twimlError)
+      return new NextResponse(
+        '<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, there was an error.</Say><Hangup/></Response>',
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/xml; charset=utf-8',
+          },
+        }
+      )
+    }
   }
 }
 

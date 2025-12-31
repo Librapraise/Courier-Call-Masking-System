@@ -7,11 +7,12 @@ import { supabaseAdmin } from '@/lib/supabase/server'
  * Updates call logs when call status changes (ringing, in-progress, completed, failed, etc.)
  */
 export async function GET(request: NextRequest) {
-  // Handle GET requests (some monitoring tools or browsers might try GET)
-  console.log('[API] /api/call/status - GET request received (status endpoint only accepts POST)')
-  return new NextResponse('Method not allowed. This endpoint only accepts POST requests from Twilio.', { 
-    status: 405,
+  // Handle GET requests (health checks, monitoring tools, etc.)
+  // Return 200 instead of 405 to avoid cluttering logs with errors
+  return new NextResponse('This endpoint accepts POST requests from Twilio only.', {
+    status: 200,
     headers: {
+      'Content-Type': 'text/plain',
       'Allow': 'POST'
     }
   })
