@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
 import type { Setting } from '@/types/database'
+import { formatPhoneForDisplay, formatPhoneForStorage } from '@/lib/utils/phone'
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Record<string, string>>({})
@@ -46,7 +47,12 @@ export default function SettingsPage() {
 
       const settingsMap: Record<string, string> = {}
       data?.forEach(setting => {
-        settingsMap[setting.key] = setting.value
+        // Format phone numbers for display
+        if (setting.key === 'business_phone_number' && setting.value) {
+          settingsMap[setting.key] = formatPhoneForDisplay(setting.value)
+        } else {
+          settingsMap[setting.key] = setting.value
+        }
       })
       setSettings(settingsMap)
     } catch (err: any) {
@@ -65,13 +71,18 @@ export default function SettingsPage() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) throw new Error('Not authenticated')
 
-      // Update each setting
-      const updates = Object.entries(settings).map(([key, value]) =>
-        supabase
+      // Update each setting, formatting phone numbers for storage
+      const updates = Object.entries(settings).map(([key, value]) => {
+        // Format business phone number for storage (adds +972 if needed)
+        const formattedValue = key === 'business_phone_number' && value 
+          ? formatPhoneForStorage(value)
+          : value
+        
+        return supabase
           .from('settings')
-          .update({ value, updated_by: session.user.id })
+          .update({ value: formattedValue, updated_by: session.user.id })
           .eq('key', key)
-      )
+      })
 
       await Promise.all(updates)
 
@@ -250,11 +261,11 @@ export default function SettingsPage() {
                   id="business-phone"
                   value={settings.business_phone_number || ''}
                   onChange={(e) => handleChange('business_phone_number', e.target.value)}
-                  placeholder="+1234567890"
+                  placeholder="050-123-4567"
                   className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-black shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
                 />
                 <p className="mt-1 text-xs text-gray-500">
-                  Phone number shown as caller ID to customers
+                  Phone number shown as caller ID to customers. Enter Israeli phone number (e.g., 050-123-4567)
                 </p>
               </div>
             </div>

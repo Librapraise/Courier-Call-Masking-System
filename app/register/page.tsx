@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
+import { formatPhoneForStorage, isValidPhoneFormat } from '@/lib/utils/phone'
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('')
@@ -37,9 +38,9 @@ export default function RegisterPage() {
       return
     }
 
-    // Validate phone number format (E.164 format)
-    if (phoneNumber && !/^\+?[1-9]\d{1,14}$/.test(phoneNumber)) {
-      setError('Please enter a valid phone number in E.164 format (e.g., +1234567890)')
+    // Validate phone number format
+    if (phoneNumber && !isValidPhoneFormat(phoneNumber)) {
+      setError('Please enter a valid phone number')
       setLoading(false)
       return
     }
@@ -55,8 +56,8 @@ export default function RegisterPage() {
       if (data.user) {
         // Update profile with phone number if provided
         if (phoneNumber) {
-          // Format phone number to ensure it starts with +
-          const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`
+          // Format phone number for storage (adds +972 if needed)
+          const formattedPhone = formatPhoneForStorage(phoneNumber)
           
           const { error: profileError } = await supabase
             .from('profiles')
@@ -146,10 +147,10 @@ export default function RegisterPage() {
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 className="mt-1 block w-full rounded-md text-black border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
-                placeholder="+1234567890 (E.164 format)"
+                placeholder="050-123-4567"
               />
               <p className="mt-1 text-xs text-gray-500">
-                Add your phone number to enable call functionality. You can add it later in your profile.
+                Add your phone number to enable call functionality. Enter your Israeli phone number (e.g., 050-123-4567). You can add it later in your profile.
               </p>
             </div>
             <div>

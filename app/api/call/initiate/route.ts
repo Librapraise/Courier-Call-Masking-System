@@ -278,7 +278,32 @@ export async function POST(request: NextRequest) {
         message: 'Call initiated successfully',
       })
     } catch (twilioError: any) {
-      console.error('[API] /api/call/initiate - Twilio error:', twilioError.message || twilioError)
+      const errorMessage = twilioError.message || twilioError.toString() || 'Unknown error'
+      const errorCode = twilioError.code || twilioError.errno || ''
+      
+      console.error('[API] /api/call/initiate - Twilio error:', {
+        message: errorMessage,
+        code: errorCode,
+        name: twilioError.name,
+        stack: twilioError.stack
+      })
+
+      // Check for specific error types
+      let userFriendlyMessage = 'Failed to initiate call'
+      
+      if (errorMessage.includes('EAI_AGAIN') || errorMessage.includes('getaddrinfo')) {
+        userFriendlyMessage = 'Network error: Unable to connect to Twilio. Please check your internet connection and try again.'
+      } else if (errorMessage.includes('ETIMEDOUT') || errorMessage.includes('timeout')) {
+        userFriendlyMessage = 'Connection timeout: Twilio service is not responding. Please try again.'
+      } else if (errorMessage.includes('ENOTFOUND')) {
+        userFriendlyMessage = 'DNS error: Unable to resolve Twilio server. Please check your network settings.'
+      } else if (twilioError.status === 401) {
+        userFriendlyMessage = 'Authentication failed: Invalid Twilio credentials. Please check your environment variables.'
+      } else if (twilioError.status === 400) {
+        userFriendlyMessage = `Invalid request: ${errorMessage}`
+      } else {
+        userFriendlyMessage = `Failed to initiate call: ${errorMessage}`
+      }
 
       // Log failed call attempt with error details
       const logResult = await supabaseAdmin.from('call_logs').insert({
@@ -289,7 +314,7 @@ export async function POST(request: NextRequest) {
         agent_name: agentName,
         call_status: 'failed',
         call_timestamp: new Date().toISOString(),
-        error_message: twilioError.message || 'Failed to initiate call',
+        error_message: errorMessage,
       })
 
       if (logResult.error) {
@@ -297,7 +322,7 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json(
-        { error: `Failed to initiate call: ${twilioError.message || 'Unknown error'}` },
+        { error: userFriendlyMessage },
         { status: 500 }
       )
     }

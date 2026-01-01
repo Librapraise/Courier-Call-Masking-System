@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
 import type { Customer } from '@/types/database'
+import { formatPhoneForDisplay, formatPhoneForStorage, isValidPhoneFormat } from '@/lib/utils/phone'
 
 export default function AdminPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -61,12 +62,14 @@ export default function AdminPage() {
     e.preventDefault()
     setMessage(null)
 
-    // Validate phone number format (basic validation)
-    const phoneRegex = /^\+?[1-9]\d{1,14}$/
-    if (!phoneRegex.test(formData.phone_number)) {
-      setMessage({ type: 'error', text: 'Please enter a valid phone number (E.164 format)' })
+    // Validate phone number format
+    if (!isValidPhoneFormat(formData.phone_number)) {
+      setMessage({ type: 'error', text: 'Please enter a valid phone number' })
       return
     }
+    
+    // Format phone number for storage (adds +972 if needed)
+    const formattedPhone = formatPhoneForStorage(formData.phone_number)
 
     try {
       const { data: { session } } = await supabase.auth.getSession()
@@ -78,7 +81,7 @@ export default function AdminPage() {
           .from('customers')
           .update({
             name: formData.name,
-            phone_number: formData.phone_number,
+            phone_number: formattedPhone,
           })
           .eq('id', editingCustomer.id)
 
@@ -90,7 +93,7 @@ export default function AdminPage() {
           .from('customers')
           .insert({
             name: formData.name,
-            phone_number: formData.phone_number,
+            phone_number: formattedPhone,
             created_by: session.user.id,
           })
 
@@ -109,7 +112,7 @@ export default function AdminPage() {
 
   const handleEdit = (customer: Customer) => {
     setEditingCustomer(customer)
-    setFormData({ name: customer.name, phone_number: customer.phone_number })
+    setFormData({ name: customer.name, phone_number: formatPhoneForDisplay(customer.phone_number) })
     setShowAddForm(true)
   }
 
@@ -302,7 +305,7 @@ export default function AdminPage() {
               </div>
               <div>
                 <label htmlFor="phone" className="block text-sm font-medium text-gray-700">
-                  Phone Number * (E.164 format, e.g., +1234567890)
+                  Phone Number * (e.g., 050-123-4567)
                 </label>
                 <input
                   type="tel"
@@ -311,7 +314,7 @@ export default function AdminPage() {
                   value={formData.phone_number}
                   onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
                   className="mt-1 block w-full rounded-md text-black border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
-                  placeholder="+1234567890"
+                  placeholder="050-123-4567"
                 />
               </div>
               <div className="flex gap-2">
@@ -373,11 +376,11 @@ export default function AdminPage() {
                     <td className="px-3 sm:px-6 py-4 text-sm font-medium text-gray-900">
                       <div className="flex flex-col">
                         <span>{customer.name}</span>
-                        <span className="text-xs text-gray-500 sm:hidden mt-1">{customer.phone_number}</span>
+                        <span className="text-xs text-gray-500 sm:hidden mt-1">{formatPhoneForDisplay(customer.phone_number)}</span>
                       </div>
                     </td>
                     <td className="hidden sm:table-cell px-6 py-4 text-sm text-gray-500">
-                      {customer.phone_number}
+                      {formatPhoneForDisplay(customer.phone_number)}
                     </td>
                     <td className="px-3 sm:px-6 py-4 text-sm">
                       <span

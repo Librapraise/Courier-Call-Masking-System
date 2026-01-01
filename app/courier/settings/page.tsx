@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
+import { formatPhoneForDisplay, formatPhoneForStorage, isValidPhoneFormat } from '@/lib/utils/phone'
 
 export default function CourierSettingsPage() {
   const [phoneNumber, setPhoneNumber] = useState('')
@@ -48,7 +49,7 @@ export default function CourierSettingsPage() {
         .single()
 
       if (error) throw error
-      setPhoneNumber(profile?.phone_number || '')
+      setPhoneNumber(formatPhoneForDisplay(profile?.phone_number || ''))
     } catch (err: any) {
       console.error('Error fetching profile:', err)
       setMessage({ type: 'error', text: 'Failed to load profile' })
@@ -62,9 +63,9 @@ export default function CourierSettingsPage() {
     setSaving(true)
     setMessage(null)
 
-    // Validate phone number format (E.164 format)
-    if (phoneNumber && !/^\+?[1-9]\d{1,14}$/.test(phoneNumber)) {
-      setMessage({ type: 'error', text: 'Please enter a valid phone number in E.164 format (e.g., +1234567890)' })
+    // Validate phone number format
+    if (phoneNumber && !isValidPhoneFormat(phoneNumber)) {
+      setMessage({ type: 'error', text: 'Please enter a valid phone number' })
       setSaving(false)
       return
     }
@@ -75,10 +76,8 @@ export default function CourierSettingsPage() {
         throw new Error('Not authenticated')
       }
 
-      // Format phone number to ensure it starts with +
-      const formattedPhone = phoneNumber.trim() 
-        ? (phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`)
-        : null
+      // Format phone number for storage (adds +972 if needed)
+      const formattedPhone = phoneNumber.trim() ? formatPhoneForStorage(phoneNumber) : null
 
       const { error } = await supabase
         .from('profiles')
@@ -146,10 +145,10 @@ export default function CourierSettingsPage() {
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 className="mt-1 block w-full text-black rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
-                placeholder="+1234567890 (E.164 format)"
+                placeholder="050-123-4567"
               />
               <p className="mt-1 text-sm text-gray-500">
-                Your phone number is required to make calls to customers. Format: +[country code][number]
+                Your phone number is required to make calls to customers. Enter your Israeli phone number (e.g., 050-123-4567)
               </p>
             </div>
 
