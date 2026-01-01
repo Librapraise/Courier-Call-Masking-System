@@ -4,15 +4,16 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
-import type { Customer } from '@/types/database'
+import type { Customer, Profile } from '@/types/database'
 import { formatPhoneForDisplay, formatPhoneForStorage, isValidPhoneFormat } from '@/lib/utils/phone'
 
 export default function AdminPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
+  const [couriers, setCouriers] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
-  const [formData, setFormData] = useState({ name: '', phone_number: '' })
+  const [formData, setFormData] = useState({ name: '', phone_number: '', assigned_courier_id: '' })
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [resetting, setResetting] = useState(false)
   const router = useRouter()
@@ -20,6 +21,7 @@ export default function AdminPage() {
   useEffect(() => {
     checkAuth()
     fetchCustomers()
+    fetchCouriers()
   }, [])
 
   const checkAuth = async () => {
@@ -58,6 +60,32 @@ export default function AdminPage() {
     }
   }
 
+  const fetchCouriers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, email, role, phone_number, created_at')
+        .eq('role', 'courier')
+        .order('email', { ascending: true })
+
+      if (error) {
+        console.error('Error fetching couriers:', error)
+        setMessage({ type: 'error', text: `Failed to load couriers: ${error.message}` })
+        return
+      }
+      
+      console.log('Fetched couriers:', data?.length || 0)
+      setCouriers(data || [])
+      
+      if (!data || data.length === 0) {
+        console.warn('No couriers found. Make sure you have courier accounts registered.')
+      }
+    } catch (err: any) {
+      console.error('Error fetching couriers:', err)
+      setMessage({ type: 'error', text: `Error loading couriers: ${err.message}` })
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setMessage(null)
@@ -75,6 +103,8 @@ export default function AdminPage() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) throw new Error('Not authenticated')
 
+      const assignedCourierId = formData.assigned_courier_id || null
+
       if (editingCustomer) {
         // Update existing customer
         const { error } = await supabase
@@ -82,6 +112,7 @@ export default function AdminPage() {
           .update({
             name: formData.name,
             phone_number: formattedPhone,
+            assigned_courier_id: assignedCourierId,
           })
           .eq('id', editingCustomer.id)
 
@@ -94,6 +125,7 @@ export default function AdminPage() {
           .insert({
             name: formData.name,
             phone_number: formattedPhone,
+            assigned_courier_id: assignedCourierId,
             created_by: session.user.id,
           })
 
@@ -101,7 +133,7 @@ export default function AdminPage() {
         setMessage({ type: 'success', text: 'Customer added successfully!' })
       }
 
-      setFormData({ name: '', phone_number: '' })
+      setFormData({ name: '', phone_number: '', assigned_courier_id: '' })
       setShowAddForm(false)
       setEditingCustomer(null)
       fetchCustomers()
@@ -112,8 +144,27 @@ export default function AdminPage() {
 
   const handleEdit = (customer: Customer) => {
     setEditingCustomer(customer)
-    setFormData({ name: customer.name, phone_number: formatPhoneForDisplay(customer.phone_number) })
+    setFormData({ 
+      name: customer.name, 
+      phone_number: formatPhoneForDisplay(customer.phone_number),
+      assigned_courier_id: customer.assigned_courier_id || ''
+    })
     setShowAddForm(true)
+  }
+
+  const handleAssignCourier = async (customerId: string, courierId: string | null) => {
+    try {
+      const { error } = await supabase
+        .from('customers')
+        .update({ assigned_courier_id: courierId })
+        .eq('id', customerId)
+
+      if (error) throw error
+      fetchCustomers()
+      setMessage({ type: 'success', text: 'Customer assignment updated!' })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to update assignment' })
+    }
   }
 
   const handleDelete = async (customerId: string) => {
@@ -256,7 +307,7 @@ export default function AdminPage() {
               onClick={() => {
                 setShowAddForm(!showAddForm)
                 setEditingCustomer(null)
-                setFormData({ name: '', phone_number: '' })
+                setFormData({ name: '', phone_number: '', assigned_courier_id: '' })
               }}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm sm:text-base text-white hover:bg-blue-700"
             >
@@ -317,6 +368,33 @@ export default function AdminPage() {
                   placeholder="050-123-4567"
                 />
               </div>
+              <div>
+                <label htmlFor="assigned_courier" className="block text-sm font-medium text-gray-700">
+                  Assign to Courier (Optional)
+                </label>
+                <select
+                  id="assigned_courier"
+                  value={formData.assigned_courier_id}
+                  onChange={(e) => setFormData({ ...formData, assigned_courier_id: e.target.value })}
+                  className="mt-1 block w-full rounded-md text-black border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                >
+                  <option value="">Unassigned (visible to all couriers)</option>
+                  {couriers.length === 0 ? (
+                    <option value="" disabled>No couriers available - Check console for errors</option>
+                  ) : (
+                    couriers.map((courier) => (
+                      <option key={courier.id} value={courier.id}>
+                        {courier.email}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  {couriers.length === 0 
+                    ? 'No couriers found. Register courier accounts first. Check browser console for errors.'
+                    : `Assign this customer to a specific courier. Unassigned customers are visible to all couriers. (${couriers.length} courier${couriers.length !== 1 ? 's' : ''} available)`}
+                </p>
+              </div>
               <div className="flex gap-2">
                 <button
                   type="submit"
@@ -329,7 +407,7 @@ export default function AdminPage() {
                   onClick={() => {
                     setShowAddForm(false)
                     setEditingCustomer(null)
-                    setFormData({ name: '', phone_number: '' })
+                    setFormData({ name: '', phone_number: '', assigned_courier_id: '' })
                   }}
                   className="rounded-md bg-gray-200 px-4 py-2 text-gray-700 hover:bg-gray-300"
                 >
@@ -363,6 +441,9 @@ export default function AdminPage() {
                     Phone Number
                   </th>
                   <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                    Assigned Courier
+                  </th>
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                     Status
                   </th>
                   <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
@@ -381,6 +462,21 @@ export default function AdminPage() {
                     </td>
                     <td className="hidden sm:table-cell px-6 py-4 text-sm text-gray-500">
                       {formatPhoneForDisplay(customer.phone_number)}
+                    </td>
+                    <td className="px-3 sm:px-6 py-4 text-sm">
+                      <select
+                        value={customer.assigned_courier_id || ''}
+                        onChange={(e) => handleAssignCourier(customer.id, e.target.value || null)}
+                        className="rounded-md border border-gray-300 px-2 py-1 text-xs text-black focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                        title="Quick assign courier"
+                      >
+                        <option value="">Unassigned</option>
+                        {couriers.map((courier) => (
+                          <option key={courier.id} value={courier.id}>
+                            {courier.email}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td className="px-3 sm:px-6 py-4 text-sm">
                       <span

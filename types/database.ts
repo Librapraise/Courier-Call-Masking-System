@@ -15,6 +15,7 @@ export interface Customer {
   is_active: boolean
   created_at: string
   created_by: string | null
+  assigned_courier_id: string | null
 }
 
 export interface CustomerPublic {
