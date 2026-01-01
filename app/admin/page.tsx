@@ -94,16 +94,61 @@ export default function AdminPage() {
     e.preventDefault()
     setMessage(null)
 
-    // Parse the combined input: first line = address/name, second line = phone
-    const lines = formData.addressAndPhone.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+    // Parse the input - can be single line or multiple lines
+    // Try to detect phone number pattern and split accordingly
+    const inputText = formData.addressAndPhone.trim()
     
-    if (lines.length < 2) {
-      setMessage({ type: 'error', text: 'Please enter address on the first line and phone number on the second line' })
+    if (!inputText) {
+      setMessage({ type: 'error', text: 'Please enter address and phone number' })
       return
     }
 
-    const name = lines[0] // First line = address/name
-    const phoneInput = lines[1] // Second line = phone number
+    // Phone number pattern: Israeli numbers (starts with 0 or +972, followed by 9-10 digits)
+    // Also matches formats like 050-123-4567, 050 123 4567, etc.
+    const phonePattern = /(\+?972[-.\s]?|0)([1-9]\d{1,2}[-.\s]?\d{3}[-.\s]?\d{4}|\d{2,3}[-.\s]?\d{3}[-.\s]?\d{4})/g
+    
+    // Find all potential phone numbers in the text
+    const phoneMatches = inputText.match(phonePattern)
+    
+    let name = ''
+    let phoneInput = ''
+    
+    if (phoneMatches && phoneMatches.length > 0) {
+      // Use the last phone number found (in case there are multiple)
+      phoneInput = phoneMatches[phoneMatches.length - 1].trim()
+      // Everything before the phone number is the name/address
+      const phoneIndex = inputText.lastIndexOf(phoneInput)
+      name = inputText.substring(0, phoneIndex).trim()
+      
+      // If name is empty, try splitting by lines
+      if (!name) {
+        const lines = inputText.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+        if (lines.length >= 2) {
+          // If multiple lines, assume last line is phone, rest is name
+          phoneInput = lines[lines.length - 1]
+          name = lines.slice(0, -1).join(' ').trim()
+        } else {
+          // Single line with phone detected - extract phone and get rest as name
+          name = inputText.replace(phoneInput, '').trim()
+        }
+      }
+    } else {
+      // No phone pattern detected, try line-based parsing
+      const lines = inputText.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+      
+      if (lines.length >= 2) {
+        // Multiple lines: assume last line is phone, rest is name
+        phoneInput = lines[lines.length - 1]
+        name = lines.slice(0, -1).join(' ').trim()
+      } else {
+        // Single line, no phone pattern - ask user to format properly
+        setMessage({ type: 'error', text: 'Could not detect phone number. Please ensure the phone number is clearly separated (e.g., on a new line or with spaces).' })
+        return
+      }
+    }
+    
+    // Clean up phone input (remove spaces, dashes, dots for validation)
+    phoneInput = phoneInput.replace(/[-.\s]/g, '')
 
     // Validate phone number format
     if (!isValidPhoneFormat(phoneInput)) {
@@ -436,14 +481,14 @@ export default function AdminPage() {
                 <textarea
                   id="addressAndPhone"
                   required
-                  rows={2}
+                  rows={5}
                   value={formData.addressAndPhone}
                   onChange={(e) => setFormData({ ...formData, addressAndPhone: e.target.value })}
                   className="mt-1 block w-full rounded-md text-black border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 font-mono text-sm"
-                  placeholder="Zhabotinsky 16 Rishon Lezion&#10;0546624212"
+                  placeholder="Paste your receipt or form here, then edit to keep only:&#10;Line 1: Name/Address (e.g., Zhabotinsky 16 Rishon Lezion)&#10;Line 2: Phone number (e.g., 0546624212)"
                 />
                 <p className="mt-1 text-xs text-gray-500">
-                  First line: Address/Name | Second line: Phone number (e.g., 050-123-4567 or 0546624212)
+                  <strong>Instructions:</strong> Paste your receipt/form, delete unnecessary lines, keep only: <strong>Line 1 = Name/Address</strong>, <strong>Line 2 = Phone number</strong>
                 </p>
               </div>
               <div>
