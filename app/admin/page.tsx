@@ -13,7 +13,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
-  const [formData, setFormData] = useState({ name: '', phone_number: '', assigned_courier_id: '' })
+  const [formData, setFormData] = useState({ addressAndPhone: '', assigned_courier_id: '' })
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [resetting, setResetting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -94,14 +94,25 @@ export default function AdminPage() {
     e.preventDefault()
     setMessage(null)
 
+    // Parse the combined input: first line = address/name, second line = phone
+    const lines = formData.addressAndPhone.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+    
+    if (lines.length < 2) {
+      setMessage({ type: 'error', text: 'Please enter address on the first line and phone number on the second line' })
+      return
+    }
+
+    const name = lines[0] // First line = address/name
+    const phoneInput = lines[1] // Second line = phone number
+
     // Validate phone number format
-    if (!isValidPhoneFormat(formData.phone_number)) {
-      setMessage({ type: 'error', text: 'Please enter a valid phone number' })
+    if (!isValidPhoneFormat(phoneInput)) {
+      setMessage({ type: 'error', text: 'Please enter a valid phone number on the second line' })
       return
     }
     
     // Format phone number for storage (adds +972 if needed)
-    const formattedPhone = formatPhoneForStorage(formData.phone_number)
+    const formattedPhone = formatPhoneForStorage(phoneInput)
 
     try {
       const { data: { session } } = await supabase.auth.getSession()
@@ -114,7 +125,7 @@ export default function AdminPage() {
         const { error } = await supabase
           .from('customers')
           .update({
-            name: formData.name,
+            name: name,
             phone_number: formattedPhone,
             assigned_courier_id: assignedCourierId,
           })
@@ -127,7 +138,7 @@ export default function AdminPage() {
         const { error } = await supabase
           .from('customers')
           .insert({
-            name: formData.name,
+            name: name,
             phone_number: formattedPhone,
             assigned_courier_id: assignedCourierId,
             created_by: session.user.id,
@@ -137,7 +148,7 @@ export default function AdminPage() {
         setMessage({ type: 'success', text: 'Customer added successfully!' })
       }
 
-      setFormData({ name: '', phone_number: '', assigned_courier_id: '' })
+      setFormData({ addressAndPhone: '', assigned_courier_id: '' })
       setShowAddForm(false)
       setEditingCustomer(null)
       fetchCustomers()
@@ -148,9 +159,10 @@ export default function AdminPage() {
 
   const handleEdit = (customer: Customer) => {
     setEditingCustomer(customer)
+    // Combine name and phone into two-line format
+    const combinedInput = `${customer.name}\n${formatPhoneForDisplay(customer.phone_number)}`
     setFormData({ 
-      name: customer.name, 
-      phone_number: formatPhoneForDisplay(customer.phone_number),
+      addressAndPhone: combinedInput,
       assigned_courier_id: customer.assigned_courier_id || ''
     })
     setShowAddForm(true)
@@ -384,7 +396,7 @@ export default function AdminPage() {
               onClick={() => {
                 setShowAddForm(!showAddForm)
                 setEditingCustomer(null)
-                setFormData({ name: '', phone_number: '', assigned_courier_id: '' })
+                setFormData({ addressAndPhone: '', assigned_courier_id: '' })
               }}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm sm:text-base text-white hover:bg-blue-700"
             >
@@ -418,32 +430,21 @@ export default function AdminPage() {
             </h3>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-                  Name *
+                <label htmlFor="addressAndPhone" className="block text-sm font-medium text-gray-700">
+                  Name/Address & Phone Number *
                 </label>
-                <input
-                  type="text"
-                  id="name"
+                <textarea
+                  id="addressAndPhone"
                   required
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="mt-1 block w-full rounded-md text-black border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
-                  placeholder="Customer name"
+                  rows={2}
+                  value={formData.addressAndPhone}
+                  onChange={(e) => setFormData({ ...formData, addressAndPhone: e.target.value })}
+                  className="mt-1 block w-full rounded-md text-black border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 font-mono text-sm"
+                  placeholder="Zhabotinsky 16 Rishon Lezion&#10;0546624212"
                 />
-              </div>
-              <div>
-                <label htmlFor="phone" className="block text-sm font-medium text-gray-700">
-                  Phone Number * (e.g., 050-123-4567)
-                </label>
-                <input
-                  type="tel"
-                  id="phone"
-                  required
-                  value={formData.phone_number}
-                  onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
-                  className="mt-1 block w-full rounded-md text-black border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
-                  placeholder="050-123-4567"
-                />
+                <p className="mt-1 text-xs text-gray-500">
+                  First line: Address/Name | Second line: Phone number (e.g., 050-123-4567 or 0546624212)
+                </p>
               </div>
               <div>
                 <label htmlFor="assigned_courier" className="block text-sm font-medium text-gray-700">
@@ -484,7 +485,7 @@ export default function AdminPage() {
                   onClick={() => {
                     setShowAddForm(false)
                     setEditingCustomer(null)
-                    setFormData({ name: '', phone_number: '', assigned_courier_id: '' })
+                    setFormData({ addressAndPhone: '', assigned_courier_id: '' })
                   }}
                   className="rounded-md bg-gray-200 px-4 py-2 text-gray-700 hover:bg-gray-300"
                 >
