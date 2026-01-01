@@ -30,6 +30,12 @@ CREATE POLICY "Admins can view all profiles"
   ON profiles FOR SELECT
   USING (public.is_admin(auth.uid()));
 
+-- Allow admins to delete profiles (needed for courier management)
+DROP POLICY IF EXISTS "Admins can delete profiles" ON profiles;
+CREATE POLICY "Admins can delete profiles"
+  ON profiles FOR DELETE
+  USING (public.is_admin(auth.uid()));
+
 -- Update RLS policy for couriers to only see their assigned customers
 -- Drop both old and new policy names in case either exists
 DROP POLICY IF EXISTS "Couriers can view customer names only" ON customers;

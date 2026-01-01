@@ -16,6 +16,8 @@ export default function AdminPage() {
   const [formData, setFormData] = useState({ name: '', phone_number: '', assigned_courier_id: '' })
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [resetting, setResetting] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -30,6 +32,8 @@ export default function AdminPage() {
       router.push('/login')
       return
     }
+
+    setCurrentUserId(session.user.id)
 
     // Verify user is an admin
     const { data: profile } = await supabase
@@ -167,7 +171,53 @@ export default function AdminPage() {
     }
   }
 
-  const handleDelete = async (customerId: string) => {
+  const handleDeleteCourier = async (courierId: string) => {
+    // Prevent self-deletion
+    if (currentUserId === courierId) {
+      setMessage({ type: 'error', text: 'You cannot delete your own account' })
+      return
+    }
+
+    if (!confirm('⚠️ WARNING: This will permanently delete this courier account and all associated data (call logs, customer assignments). This action cannot be undone. Are you sure?')) {
+      return
+    }
+
+    try {
+      // Get access token for API call
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        setMessage({ type: 'error', text: 'Session expired. Please log in again.' })
+        return
+      }
+
+      // Call API route that uses admin client to bypass RLS
+      const response = await fetch('/api/admin/delete-courier', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          courierId,
+          accessToken: session.access_token,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to delete courier')
+      }
+
+      setMessage({ type: 'success', text: 'Courier deleted successfully!' })
+      fetchCouriers()
+      fetchCustomers() // Refresh customers in case assignments changed
+    } catch (err: any) {
+      console.error('Error deleting courier:', err)
+      setMessage({ type: 'error', text: err.message || 'Failed to delete courier' })
+    }
+  }
+
+  const handleDeactivate = async (customerId: string) => {
     if (!confirm('Are you sure you want to deactivate this customer?')) return
 
     try {
@@ -181,6 +231,25 @@ export default function AdminPage() {
       fetchCustomers()
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Failed to deactivate customer' })
+    }
+  }
+
+  const handleDelete = async (customerId: string) => {
+    if (!confirm('⚠️ WARNING: This will permanently delete this customer and all associated call logs. This action cannot be undone. Are you sure?')) {
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('customers')
+        .delete()
+        .eq('id', customerId)
+
+      if (error) throw error
+      setMessage({ type: 'success', text: 'Customer deleted permanently!' })
+      fetchCustomers()
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to delete customer' })
     }
   }
 
@@ -243,6 +312,14 @@ export default function AdminPage() {
   }
 
   const activeCustomers = customers.filter((c) => c.is_active)
+  
+  // Filter customers based on search query
+  const filteredCustomers = searchQuery.trim()
+    ? customers.filter((customer) =>
+        customer.name.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
+        formatPhoneForDisplay(customer.phone_number).toLowerCase().includes(searchQuery.toLowerCase().trim())
+      )
+    : customers
 
   if (loading) {
     return (
@@ -419,15 +496,39 @@ export default function AdminPage() {
         )}
 
         <div className="mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">All Customers</h3>
-          <p className="text-sm text-gray-600">
-            {activeCustomers.length} active, {customers.length - activeCustomers.length} inactive
-          </p>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">All Customers</h3>
+              <p className="text-sm text-gray-600">
+                {activeCustomers.length} active, {customers.length - activeCustomers.length} inactive
+                {searchQuery.trim() && ` • ${filteredCustomers.length} match${filteredCustomers.length !== 1 ? 'es' : ''}`}
+              </p>
+            </div>
+            <div className="w-full sm:w-auto">
+              <input
+                type="text"
+                placeholder="Search customers by name or phone..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full sm:w-80 rounded-md border border-gray-300 px-4 py-2 text-black shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+              />
+            </div>
+          </div>
         </div>
 
         {customers.length === 0 ? (
           <div className="rounded-lg bg-white p-8 text-center shadow">
             <p className="text-gray-600">No customers found. Add your first customer above.</p>
+          </div>
+        ) : filteredCustomers.length === 0 ? (
+          <div className="rounded-lg bg-white p-8 text-center shadow">
+            <p className="text-gray-600">No customers match your search "{searchQuery}".</p>
+            <button
+              onClick={() => setSearchQuery('')}
+              className="mt-2 text-blue-600 hover:text-blue-700 text-sm"
+            >
+              Clear search
+            </button>
           </div>
         ) : (
           <div className="overflow-x-auto rounded-lg bg-white shadow">
@@ -452,7 +553,7 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 bg-white">
-                {customers.map((customer) => (
+                {filteredCustomers.map((customer) => (
                   <tr key={customer.id}>
                     <td className="px-3 sm:px-6 py-4 text-sm font-medium text-gray-900">
                       <div className="flex flex-col">
@@ -498,19 +599,38 @@ export default function AdminPage() {
                           Edit
                         </button>
                         {customer.is_active ? (
-                          <button
-                            onClick={() => handleDelete(customer.id)}
-                            className="rounded-md bg-red-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-red-700"
-                          >
-                            Deactivate
-                          </button>
+                          <>
+                            <button
+                              onClick={() => handleDeactivate(customer.id)}
+                              className="rounded-md bg-orange-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-orange-700"
+                              title="Deactivate customer (can be reactivated later)"
+                            >
+                              Deactivate
+                            </button>
+                            <button
+                              onClick={() => handleDelete(customer.id)}
+                              className="rounded-md bg-red-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-red-700"
+                              title="Permanently delete customer"
+                            >
+                              Delete
+                            </button>
+                          </>
                         ) : (
-                          <button
-                            onClick={() => handleReactivate(customer.id)}
-                            className="rounded-md bg-green-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-green-700"
-                          >
-                            Reactivate
-                          </button>
+                          <>
+                            <button
+                              onClick={() => handleReactivate(customer.id)}
+                              className="rounded-md bg-green-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-green-700"
+                            >
+                              Reactivate
+                            </button>
+                            <button
+                              onClick={() => handleDelete(customer.id)}
+                              className="rounded-md bg-red-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-red-700"
+                              title="Permanently delete customer"
+                            >
+                              Delete
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -520,8 +640,81 @@ export default function AdminPage() {
             </table>
           </div>
         )}
+
+        {/* Couriers Management Section */}
+        <div className="mt-12">
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold text-gray-900">Couriers Management</h3>
+            <p className="text-sm text-gray-600">
+              {couriers.length} courier{couriers.length !== 1 ? 's' : ''} registered
+            </p>
+          </div>
+
+          {couriers.length === 0 ? (
+            <div className="rounded-lg bg-white p-8 text-center shadow">
+              <p className="text-gray-600">No couriers found. Couriers will appear here once they register.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg bg-white shadow">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                      Email
+                    </th>
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hidden sm:table-cell">
+                      Phone Number
+                    </th>
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hidden sm:table-cell">
+                      Registered
+                    </th>
+                    <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 bg-white">
+                  {couriers.map((courier) => {
+                    const isCurrentUser = currentUserId === courier.id
+                    return (
+                      <tr key={courier.id}>
+                        <td className="px-3 sm:px-6 py-4 text-sm font-medium text-gray-900">
+                          <div className="flex flex-col">
+                            <span>{courier.email}</span>
+                            <span className="text-xs text-gray-500 sm:hidden mt-1">
+                              {courier.phone_number ? formatPhoneForDisplay(courier.phone_number) : 'No phone'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="hidden sm:table-cell px-6 py-4 text-sm text-gray-500">
+                          {courier.phone_number ? formatPhoneForDisplay(courier.phone_number) : 'Not set'}
+                        </td>
+                        <td className="hidden sm:table-cell px-6 py-4 text-sm text-gray-500">
+                          {courier.created_at 
+                            ? new Date(courier.created_at).toLocaleDateString()
+                            : 'Unknown'}
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 text-right text-sm">
+                          <button
+                            onClick={() => handleDeleteCourier(courier.id)}
+                            disabled={isCurrentUser}
+                            className="rounded-md bg-red-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                            title={isCurrentUser ? 'You cannot delete your own account' : 'Permanently delete courier'}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </main>
     </div>
   )
 }
+
 
