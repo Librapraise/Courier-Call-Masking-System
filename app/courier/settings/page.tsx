@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
 import { formatPhoneForDisplay, formatPhoneForStorage, isValidPhoneFormat } from '@/lib/utils/phone'
+import Navigation from '@/components/Navigation'
 
 export default function CourierSettingsPage() {
   const [phoneNumber, setPhoneNumber] = useState('')
@@ -104,21 +105,12 @@ export default function CourierSettingsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex lg:h-16 md:h-24 flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-3 sm:py-0">
-            <h1 className="text-lg sm:text-xl font-semibold text-gray-900">Courier Settings</h1>
-            <div className="flex flex-wrap gap-2 sm:gap-4">
-              <Link
-                href="/courier"
-                className="rounded-md bg-gray-200 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-300"
-              >
-                Back to Dashboard
-              </Link>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Navigation
+        title="Courier Settings"
+        links={[
+          { href: '/courier', label: 'Back to Dashboard', isPrimary: true },
+        ]}
+      />
 
       <main className="mx-auto max-w-2xl px-4 py-6 sm:py-8 sm:px-6 lg:px-8">
         <div className="rounded-lg bg-white p-4 sm:p-6 shadow">

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
 import type { CallLog } from '@/types/database'
+import Navigation from '@/components/Navigation'
 
 interface DashboardStats {
   totalCallsToday: number
@@ -167,45 +168,16 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex lg:h-16 md:h-24 h-32 flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-3 sm:py-0">
-            <h1 className="text-lg sm:text-xl font-semibold text-gray-900">Admin Dashboard</h1>
-            <div className="flex flex-wrap gap-2 sm:gap-4">
-              <Link
-                href="/admin"
-                className="rounded-md bg-blue-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-blue-700"
-              >
-                Manage Customers
-              </Link>
-              <Link
-                href="/admin/logs"
-                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
-              >
-                Call Logs
-              </Link>
-              <Link
-                href="/admin/settings"
-                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
-              >
-                Settings
-              </Link>
-              <Link
-                href="/admin/guide"
-                className="rounded-md bg-gray-600 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white hover:bg-gray-700"
-              >
-                Guide
-              </Link>
-              <button
-                onClick={handleLogout}
-                className="rounded-md bg-gray-200 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-300"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Navigation
+        title="Admin Dashboard"
+        links={[
+          { href: '/admin', label: 'Manage Customers', isPrimary: true },
+          { href: '/admin/logs', label: 'Call Logs' },
+          { href: '/admin/settings', label: 'Settings' },
+          { href: '/admin/guide', label: 'Guide' },
+        ]}
+        onLogout={handleLogout}
+      />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:py-8 sm:px-6 lg:px-8">
         <div className="mb-6 sm:mb-8">
