@@ -34,6 +34,8 @@ export default function Navigation({ title, links, onLogout }: NavigationProps) 
     }
   }
 
+  const ariaExpanded = isMenuOpen ? 'true' : 'false'
+
   return (
     <nav className="bg-white shadow-sm">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -46,7 +48,7 @@ export default function Navigation({ title, links, onLogout }: NavigationProps) 
               onClick={toggleMenu}
               className="sm:hidden p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
               aria-label="Toggle menu"
-              aria-expanded={String(isMenuOpen)}
+              {...(isMenuOpen ? { 'aria-expanded': 'true' } : { 'aria-expanded': 'false' })}
             >
               <svg
                 className="h-6 w-6"

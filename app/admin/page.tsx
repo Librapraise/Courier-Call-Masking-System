@@ -612,41 +612,58 @@ export default function AdminPage() {
                       <div className="flex flex-col sm:flex-row justify-end gap-2">
                         <button
                           onClick={() => handleEdit(customer)}
-                          className="rounded-md bg-blue-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-blue-700"
+                          className="rounded-md bg-blue-600 px-2 sm:px-3 py-1.5 text-white hover:bg-blue-700 flex items-center justify-center gap-1"
+                          title="Edit customer"
                         >
-                          Edit
+                          <svg className="h-4 w-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                          <span className="hidden sm:inline text-xs sm:text-sm">Edit</span>
                         </button>
                         {customer.is_active ? (
                           <>
                             <button
                               onClick={() => handleDeactivate(customer.id)}
-                              className="rounded-md bg-orange-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-orange-700"
+                              className="rounded-md bg-orange-600 px-2 sm:px-3 py-1.5 text-white hover:bg-orange-700 flex items-center justify-center gap-1"
                               title="Deactivate customer (can be reactivated later)"
                             >
-                              Deactivate
+                              <svg className="h-4 w-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                              </svg>
+                              <span className="hidden sm:inline text-xs sm:text-sm">Deactivate</span>
                             </button>
                             <button
                               onClick={() => handleDelete(customer.id)}
-                              className="rounded-md bg-red-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-red-700"
+                              className="rounded-md bg-red-600 px-2 sm:px-3 py-1.5 text-white hover:bg-red-700 flex items-center justify-center gap-1"
                               title="Permanently delete customer"
                             >
-                              Delete
+                              <svg className="h-4 w-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                              <span className="hidden sm:inline text-xs sm:text-sm">Delete</span>
                             </button>
                           </>
                         ) : (
                           <>
                             <button
                               onClick={() => handleReactivate(customer.id)}
-                              className="rounded-md bg-green-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-green-700"
+                              className="rounded-md bg-green-600 px-2 sm:px-3 py-1.5 text-white hover:bg-green-700 flex items-center justify-center gap-1"
+                              title="Reactivate customer"
                             >
-                              Reactivate
+                              <svg className="h-4 w-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              <span className="hidden sm:inline text-xs sm:text-sm">Reactivate</span>
                             </button>
                             <button
                               onClick={() => handleDelete(customer.id)}
-                              className="rounded-md bg-red-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-red-700"
+                              className="rounded-md bg-red-600 px-2 sm:px-3 py-1.5 text-white hover:bg-red-700 flex items-center justify-center gap-1"
                               title="Permanently delete customer"
                             >
-                              Delete
+                              <svg className="h-4 w-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                              <span className="hidden sm:inline text-xs sm:text-sm">Delete</span>
                             </button>
                           </>
                         )}
@@ -716,10 +733,13 @@ export default function AdminPage() {
                           <button
                             onClick={() => handleDeleteCourier(courier.id)}
                             disabled={isCurrentUser}
-                            className="rounded-md bg-red-600 px-2 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                            className="rounded-md bg-red-600 px-2 sm:px-3 py-1.5 text-white hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1"
                             title={isCurrentUser ? 'You cannot delete your own account' : 'Permanently delete courier'}
                           >
-                            Delete
+                            <svg className="h-4 w-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            <span className="hidden sm:inline text-xs sm:text-sm">Delete</span>
                           </button>
                         </td>
                       </tr>
