@@ -19,6 +19,9 @@ export default function AdminPage() {
   const [resetting, setResetting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false)
+  const [deleteAllConfirmText, setDeleteAllConfirmText] = useState('')
+  const [deletingAll, setDeletingAll] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -369,6 +372,34 @@ export default function AdminPage() {
     }
   }
 
+  const handleDeleteAllCustomers = async () => {
+    if (deleteAllConfirmText !== 'Delete All') {
+      return
+    }
+
+    setDeletingAll(true)
+    setMessage(null)
+
+    try {
+      const { error } = await supabase
+        .from('customers')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000') // Delete all rows (neq to impossible UUID)
+
+      if (error) throw error
+
+      setMessage({ type: 'success', text: 'All customers deleted successfully!' })
+      setShowDeleteAllModal(false)
+      setDeleteAllConfirmText('')
+      fetchCustomers()
+    } catch (err: any) {
+      console.error('Error deleting all customers:', err)
+      setMessage({ type: 'error', text: err.message || 'Failed to delete all customers' })
+    } finally {
+      setDeletingAll(false)
+    }
+  }
+
   const activeCustomers = customers.filter((c) => c.is_active)
   
   // Filter customers based on search query
@@ -427,6 +458,14 @@ export default function AdminPage() {
             >
               {resetting ? 'Resetting...' : 'Reset List'}
             </button>
+            <button
+              onClick={() => setShowDeleteAllModal(true)}
+              disabled={customers.length === 0}
+              className="rounded-md bg-red-800 px-4 py-2 text-sm sm:text-base text-white hover:bg-red-900 disabled:bg-gray-400"
+              title="Delete all customers permanently"
+            >
+              Delete All
+            </button>
           </div>
         </div>
 
@@ -437,6 +476,62 @@ export default function AdminPage() {
             }`}
           >
             <p className="text-sm font-medium">{message.text}</p>
+          </div>
+        )}
+
+        {/* Delete All Customers Confirmation Modal */}
+        {showDeleteAllModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+            <div className="mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100">
+                  <svg className="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900">Delete All Customers</h3>
+              </div>
+              
+              <div className="mb-4">
+                <p className="text-sm text-gray-600">
+                  ⚠️ <strong>WARNING:</strong> This action will permanently delete <strong>all {customers.length} customer{customers.length !== 1 ? 's' : ''}</strong> and cannot be undone.
+                </p>
+              </div>
+              
+              <div className="mb-4">
+                <label htmlFor="deleteConfirm" className="block text-sm font-medium text-gray-700 mb-2">
+                  Type <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-red-600">Delete All</span> to confirm:
+                </label>
+                <input
+                  id="deleteConfirm"
+                  type="text"
+                  value={deleteAllConfirmText}
+                  onChange={(e) => setDeleteAllConfirmText(e.target.value)}
+                  placeholder="Delete All"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-black shadow-sm focus:border-red-500 focus:outline-none focus:ring-red-500"
+                  autoFocus
+                />
+              </div>
+              
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setShowDeleteAllModal(false)
+                    setDeleteAllConfirmText('')
+                  }}
+                  className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteAllCustomers}
+                  disabled={deleteAllConfirmText !== 'Delete All' || deletingAll}
+                  className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {deletingAll ? 'Deleting...' : 'Delete All Customers'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
