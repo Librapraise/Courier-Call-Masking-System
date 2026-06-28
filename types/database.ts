@@ -13,6 +13,7 @@ export interface Customer {
   name: string
   phone_number: string
   is_active: boolean
+  is_completed: boolean
   created_at: string
   created_by: string | null
   assigned_courier_id: string | null
@@ -22,7 +23,20 @@ export interface CustomerPublic {
   id: string
   name: string
   is_active: boolean
+  is_completed: boolean
   created_at: string
+}
+
+export interface Feedback {
+  id: string
+  customer_id: string
+  courier_id: string | null
+  delivery_time_rating: number
+  product_quality_rating: number
+  comment: string | null
+  created_at: string
+  customer_name?: string
+  courier_email?: string
 }
 
 export interface CallLog {

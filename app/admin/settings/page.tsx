@@ -120,6 +120,8 @@ export default function SettingsPage() {
           { href: '/admin/dashboard', label: 'Dashboard', isPrimary: true },
           { href: '/admin', label: 'Customers' },
           { href: '/admin/logs', label: 'Call Logs' },
+          { href: '/admin/feedback', label: 'Feedback' },
+          { href: '/admin/testing', label: 'Testing' },
           { href: '/admin/guide', label: 'Guide' },
         ]}
         onLogout={handleLogout}

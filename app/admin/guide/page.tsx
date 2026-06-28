@@ -43,6 +43,10 @@ export default function AdminGuide() {
         links={[
           { href: '/admin/dashboard', label: 'Dashboard', isPrimary: true },
           { href: '/admin', label: 'Customers' },
+          { href: '/admin/logs', label: 'Call Logs' },
+          { href: '/admin/feedback', label: 'Feedback' },
+          { href: '/admin/settings', label: 'Settings' },
+          { href: '/admin/testing', label: 'Testing' },
         ]}
         onLogout={handleLogout}
       />
@@ -199,6 +203,20 @@ export default function AdminGuide() {
               <li>Click <strong>"Run All Tests"</strong> to execute all test scenarios</li>
               <li>Or run individual tests to check specific functionality</li>
               <li>Review test results and fix any issues before going live</li>
+            </ol>
+          </section>
+
+          <section className="mb-8">
+            <h2 className="text-2xl font-semibold text-gray-900 mb-4">9. Customer Feedback Feature</h2>
+            <p className="text-gray-700 mb-4">
+              The system supports an automated feedback loop for deliveries:
+            </p>
+            <ol className="list-decimal list-inside space-y-2 text-gray-700">
+              <li>When a courier successfully delivers a package, they click <strong>"Completed"</strong> on their dashboard</li>
+              <li>The customer is automatically sent an SMS via Twilio containing a secure, personalized link</li>
+              <li>When the customer opens the link, they are taken to a premium feedback landing page (no login required)</li>
+              <li>The customer submits a rating (1-5 stars) for delivery time and product quality, plus a comment</li>
+              <li>All feedback submissions are immediately recorded and displayed on the <strong>Feedback</strong> tab in the admin panel</li>
             </ol>
           </section>
 

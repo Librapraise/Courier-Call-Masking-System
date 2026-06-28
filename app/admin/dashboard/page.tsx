@@ -173,7 +173,9 @@ export default function AdminDashboard() {
         links={[
           { href: '/admin', label: 'Manage Customers', isPrimary: true },
           { href: '/admin/logs', label: 'Call Logs' },
+          { href: '/admin/feedback', label: 'Feedback' },
           { href: '/admin/settings', label: 'Settings' },
+          { href: '/admin/testing', label: 'Testing' },
           { href: '/admin/guide', label: 'Guide' },
         ]}
         onLogout={handleLogout}

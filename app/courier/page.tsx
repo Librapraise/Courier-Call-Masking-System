@@ -11,6 +11,7 @@ export default function CourierPage() {
   const [customers, setCustomers] = useState<CustomerPublic[]>([])
   const [loading, setLoading] = useState(true)
   const [calling, setCalling] = useState<string | null>(null)
+  const [completing, setCompleting] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const router = useRouter()
 
@@ -42,7 +43,7 @@ export default function CourierPage() {
     try {
       const { data, error } = await supabase
         .from('customers')
-        .select('id, name, is_active, created_at')
+        .select('id, name, is_active, is_completed, created_at')
         .eq('is_active', true)
         .order('name', { ascending: true })
 
@@ -91,6 +92,53 @@ export default function CourierPage() {
     }
   }
 
+  const handleComplete = async (customerId: string) => {
+    setCompleting(customerId)
+    setMessage(null)
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        throw new Error('Not authenticated')
+      }
+
+      const response = await fetch('/api/delivery/complete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          customerId,
+          accessToken: session.access_token,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to complete delivery')
+      }
+
+      // Update customer state locally to mark completed
+      setCustomers(prev =>
+        prev.map(c => c.id === customerId ? { ...c, is_completed: true } : c)
+      )
+
+      if (result.smsSent) {
+        setMessage({ type: 'success', text: 'Delivery marked as completed and feedback SMS sent to customer!' })
+      } else {
+        setMessage({
+          type: 'success',
+          text: `Delivery completed successfully! (Note: SMS failed to send: ${result.smsError || 'Unknown Twilio error'})`,
+        })
+      }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to complete delivery' })
+    } finally {
+      setCompleting(null)
+    }
+  }
+
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/login')
@@ -118,7 +166,7 @@ export default function CourierPage() {
         <div className="mb-6">
           <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Active Customers</h2>
           <p className="mt-1 text-xs sm:text-sm text-gray-600">
-            Click "Call" to initiate a masked call to the customer
+            Click "Call" to initiate a masked call or "Completed" when delivery is done
           </p>
         </div>
 
@@ -145,7 +193,7 @@ export default function CourierPage() {
                     Customer Name
                   </th>
                   <th className="px-4 sm:px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Action
+                    Actions
                   </th>
                 </tr>
               </thead>
@@ -156,13 +204,34 @@ export default function CourierPage() {
                       {customer.name}
                     </td>
                     <td className="px-4 sm:px-6 py-4 text-right text-sm">
-                      <button
-                        onClick={() => handleCall(customer.id)}
-                        disabled={calling === customer.id}
-                        className="w-full sm:w-auto rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-gray-400"
-                      >
-                        {calling === customer.id ? 'Calling...' : 'Call'}
-                      </button>
+                      <div className="flex flex-row justify-end items-center gap-2">
+                        <button
+                          onClick={() => handleCall(customer.id)}
+                          disabled={calling === customer.id || customer.is_completed}
+                          className="w-full sm:w-auto rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-gray-400"
+                        >
+                          {calling === customer.id ? 'Calling...' : 'Call'}
+                        </button>
+                        {customer.is_completed ? (
+                          <button
+                            disabled
+                            className="w-full sm:w-auto rounded-md bg-green-100 border border-green-300 px-4 py-2 text-sm text-green-800 font-semibold cursor-not-allowed flex items-center justify-center gap-1"
+                          >
+                            <svg className="h-4 w-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Completed
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleComplete(customer.id)}
+                            disabled={completing === customer.id}
+                            className="w-full sm:w-auto rounded-md bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:bg-gray-400"
+                          >
+                            {completing === customer.id ? 'Completing...' : 'Completed'}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

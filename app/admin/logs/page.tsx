@@ -188,7 +188,9 @@ export default function CallLogsPage() {
         links={[
           { href: '/admin/dashboard', label: 'Dashboard', isPrimary: true },
           { href: '/admin', label: 'Customers' },
+          { href: '/admin/feedback', label: 'Feedback' },
           { href: '/admin/settings', label: 'Settings' },
+          { href: '/admin/testing', label: 'Testing' },
           { href: '/admin/guide', label: 'Guide' },
         ]}
         onLogout={handleLogout}

@@ -24,6 +24,7 @@ export default function TestingPage() {
     { id: '6', name: 'Test daily reset (manual trigger)', status: 'pending', message: '' },
     { id: '7', name: 'Verify call logs are accurate', status: 'pending', message: '' },
     { id: '8', name: 'Test with multiple simultaneous calls', status: 'pending', message: '' },
+    { id: '9', name: 'Verify customer feedback workflow', status: 'pending', message: '' },
   ])
   const [running, setRunning] = useState(false)
   const [testCustomer, setTestCustomer] = useState<Customer | null>(null)
@@ -286,6 +287,83 @@ export default function TestingPage() {
           break
         }
 
+        case '9': {
+          // Test 9: Verify customer feedback workflow
+          const { data: { session } } = await supabase.auth.getSession()
+          if (!session) throw new Error('Not authenticated')
+
+          // Create a temporary customer
+          const { data: customer, error: createError } = await supabase
+            .from('customers')
+            .insert({
+              name: `Feedback Test Customer ${Date.now()}`,
+              phone_number: '+15559998888',
+              created_by: session.user.id,
+            })
+            .select()
+            .single()
+
+          if (createError) throw createError
+
+          try {
+            // 1. Mark delivery as complete
+            const completeResponse = await fetch('/api/delivery/complete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                customerId: customer.id,
+                accessToken: session.access_token,
+              }),
+            })
+
+            const completeResult = await completeResponse.json()
+            if (!completeResponse.ok) {
+              throw new Error(completeResult.error || 'Complete delivery API failed')
+            }
+
+            // 2. Submit mock feedback
+            const submitResponse = await fetch('/api/feedback/submit', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                customerId: customer.id,
+                deliveryTimeRating: 5,
+                productQualityRating: 4,
+                comment: 'Automated test feedback comment',
+              }),
+            })
+
+            const submitResult = await submitResponse.json()
+            if (!submitResponse.ok) {
+              throw new Error(submitResult.error || 'Submit feedback API failed')
+            }
+
+            // 3. Verify feedback is saved in database
+            const { data: savedFeedback, error: queryError } = await supabase
+              .from('feedback')
+              .select('*')
+              .eq('customer_id', customer.id)
+              .single()
+
+            if (queryError || !savedFeedback) {
+              throw new Error(queryError?.message || 'Feedback not found in database')
+            }
+
+            // Clean up: delete the customer
+            await supabase.from('customers').delete().eq('id', customer.id)
+
+            updateTest(testId, {
+              status: 'passed',
+              message: 'Successfully completed delivery, submitted customer feedback, and verified database record.',
+            })
+          } catch (testErr: any) {
+            // Clean up customer on failure
+            await supabase.from('customers').delete().eq('id', customer.id)
+            throw testErr
+          }
+          break
+        }
+
         default:
           updateTest(testId, {
             status: 'failed',
@@ -334,6 +412,10 @@ export default function TestingPage() {
         links={[
           { href: '/admin/dashboard', label: 'Dashboard', isPrimary: true },
           { href: '/admin', label: 'Customers' },
+          { href: '/admin/logs', label: 'Call Logs' },
+          { href: '/admin/feedback', label: 'Feedback' },
+          { href: '/admin/settings', label: 'Settings' },
+          { href: '/admin/guide', label: 'Guide' },
         ]}
         onLogout={handleLogout}
       />
