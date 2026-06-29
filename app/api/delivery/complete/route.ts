@@ -4,6 +4,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import twilio from 'twilio'
 import { retryOperation } from '@/lib/twilio/webhook'
+import { generateUniqueFeedbackSlug } from '@/lib/utils/slug'
 
 export async function POST(request: NextRequest) {
   console.log('[API] /api/delivery/complete - Delivery completion request received')
@@ -46,7 +47,7 @@ export async function POST(request: NextRequest) {
             getAll() {
               return request.cookies.getAll()
             },
-            setAll() {},
+            setAll() { },
           },
         }
       )
@@ -108,10 +109,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Update customer completed status
+    // Generate a short unique feedback slug
+    const feedbackSlug = await generateUniqueFeedbackSlug()
+
+    // Update customer completed status and set feedback slug
     const { error: updateError } = await supabaseAdmin
       .from('customers')
-      .update({ is_completed: true })
+      .update({
+        is_completed: true,
+        feedback_slug: feedbackSlug
+      })
       .eq('id', customerId)
 
     if (updateError) {
@@ -122,7 +129,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log(`[API] /api/delivery/complete - Marked customer ${customerId} as completed`)
+    console.log(`[API] /api/delivery/complete - Marked customer ${customerId} as completed with slug ${feedbackSlug}`)
 
     // Send SMS via Twilio
     const accountSid = process.env.TWILIO_ACCOUNT_SID
@@ -144,10 +151,11 @@ export async function POST(request: NextRequest) {
         baseUrl = `${protocol}//${host}`
       }
       baseUrl = baseUrl.replace(/\/$/, '')
-      const feedbackUrl = `${baseUrl}/f/${customerId}`
+      const feedbackUrl = `${baseUrl}/f/${feedbackSlug}`
 
       const client = twilio(accountSid, authToken)
-      const smsBody = `היי ${customer.name}, המשלוח שלך הגיע! נשמח לקבל ממך חוות דעת קצרה כאן: ${feedbackUrl}`
+      const smsBody = `לקוח יקר, החבילה שלך הגיעה! 📦 נשמח אם תקדיש רגע ותשתף אותנו איך הייתה החוויה. כל פידבק עוזר לנו לתת שירות טוב יותר. תודה! ❤️\nקישור למשוב: ${feedbackUrl}`
+
 
       try {
         console.log(`[API] /api/delivery/complete - Sending SMS via Twilio to ${customer.phone_number.substring(0, 7)}****`)
