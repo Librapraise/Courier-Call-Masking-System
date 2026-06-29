@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
       console.error('[API] /api/delivery/complete - Twilio config missing, skipping SMS')
       smsError = 'Twilio credentials not configured'
     } else {
-      // Build feedback landing page URL
+      // Build feedback landing page URL (using a short path '/f/')
       let baseUrl = process.env.NEXT_PUBLIC_APP_URL || ''
       if (!baseUrl || baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
         const protocol = request.nextUrl.protocol || 'http:'
@@ -144,10 +144,10 @@ export async function POST(request: NextRequest) {
         baseUrl = `${protocol}//${host}`
       }
       baseUrl = baseUrl.replace(/\/$/, '')
-      const feedbackUrl = `${baseUrl}/feedback/${customerId}`
+      const feedbackUrl = `${baseUrl}/f/${customerId}`
 
       const client = twilio(accountSid, authToken)
-      const smsBody = `Hi ${customer.name}, your delivery has been completed! Please rate your experience here: ${feedbackUrl}`
+      const smsBody = `היי ${customer.name}, המשלוח שלך הגיע! נשמח לקבל ממך חוות דעת קצרה כאן: ${feedbackUrl}`
 
       try {
         console.log(`[API] /api/delivery/complete - Sending SMS via Twilio to ${customer.phone_number.substring(0, 7)}****`)
