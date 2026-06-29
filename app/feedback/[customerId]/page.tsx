@@ -14,11 +14,7 @@ const translations = {
     appreciateInput: 'אנו מעריכים את תרומתך כדי לעזור לנו לשפר את השירותים שלנו.',
     deliveryFeedback: 'משוב משלוח',
     howDidWeDo: 'איך היינו?',
-    greeting: (customer: string, courier: string) => (
-      <>
-        שלום <span style={{ fontWeight: 700, color: '#fff' }}>{customer}</span>, נשמח לשמוע על החוויה שלך עם <span style={{ fontWeight: 700, color: '#fff' }}>{courier}</span>.
-      </>
-    ),
+    greeting: 'נשמח לשמוע איך היה המשלוח האחרון שלך. המשוב שלך עוזר לנו לשפר את השירות.',
     deliveryTimeService: 'זמן משלוח ושירות',
     deliveryDesc: 'כמה מהיר ונוח היה תהליך המשלוח?',
     productQuality: 'איכות המוצר',
@@ -42,11 +38,7 @@ const translations = {
     appreciateInput: 'We appreciate your input to help us improve our services.',
     deliveryFeedback: 'Delivery Feedback',
     howDidWeDo: 'How did we do?',
-    greeting: (customer: string, courier: string) => (
-      <>
-        Hi <span style={{ fontWeight: 700, color: '#fff' }}>{customer}</span>, tell us about your experience with <span style={{ fontWeight: 700, color: '#fff' }}>{courier}</span>.
-      </>
-    ),
+    greeting: "We'd love to hear how your recent delivery went. Your feedback helps us build a better experience.",
     deliveryTimeService: 'Delivery Time & Service',
     deliveryDesc: 'How fast and convenient was the delivery process?',
     productQuality: 'Product Quality',
@@ -184,12 +176,9 @@ const ratingDescStyle: React.CSSProperties = {
 const ratingLabelStyle: React.CSSProperties = {
   display: 'inline-block',
   marginTop: 8,
-  fontSize: 12,
+  fontSize: 13,
   fontWeight: 700,
-  background: 'linear-gradient(90deg, #06b6d4, #818cf8)',
-  WebkitBackgroundClip: 'text',
-  WebkitTextFillColor: 'transparent',
-  backgroundClip: 'text',
+  color: '#67e8f9',
 }
 
 const labelStyle: React.CSSProperties = {
@@ -575,7 +564,7 @@ export default function FeedbackPage({ params }: FeedbackPageProps) {
             {t.deliveryFeedback}
           </div>
           <h1 style={headingStyle}>{t.howDidWeDo}</h1>
-          <p style={greetingStyle}>{t.greeting(customerName, courierName)}</p>
+          <p style={greetingStyle}>{t.greeting}</p>
         </div>
 
         <div style={dividerStyle} />
@@ -588,8 +577,8 @@ export default function FeedbackPage({ params }: FeedbackPageProps) {
             onMouseEnter={() => setDeliveryCardHover(true)}
             onMouseLeave={() => setDeliveryCardHover(false)}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, marginBottom: 4 }}>
-              <svg width="15" height="15" fill="none" stroke="#67e8f9" strokeWidth={2} viewBox="0 0 24 24">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 4 }}>
+              <svg width="18" height="18" style={{ flexShrink: 0 }} fill="none" stroke="#67e8f9" strokeWidth={2} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12" />
               </svg>
               <h3 style={ratingTitleStyle}>{t.deliveryTimeService}</h3>
@@ -612,8 +601,8 @@ export default function FeedbackPage({ params }: FeedbackPageProps) {
             onMouseEnter={() => setProductCardHover(true)}
             onMouseLeave={() => setProductCardHover(false)}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, marginBottom: 4 }}>
-              <svg width="15" height="15" fill="none" stroke="#a78bfa" strokeWidth={2} viewBox="0 0 24 24">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 4 }}>
+              <svg width="18" height="18" style={{ flexShrink: 0 }} fill="none" stroke="#a78bfa" strokeWidth={2} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
               </svg>
               <h3 style={ratingTitleStyle}>{t.productQuality}</h3>
