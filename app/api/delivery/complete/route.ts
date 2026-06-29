@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
       const feedbackUrl = `${baseUrl}/f/${feedbackSlug}`
 
       const client = twilio(accountSid, authToken)
-      const smsBody = `לקוח יקר, החבילה שלך הגיעה! 📦 נשמח אם תקדיש רגע ותשתף אותנו איך הייתה החוויה. כל פידבק עוזר לנו לתת שירות טוב יותר. תודה! ❤️\nקישור למשוב: ${feedbackUrl}`
+      const smsBody = `לקוח יקר, החבילה שלך הגיעה! 📦 המטה ישמח אם תקדיש רגע ותשתף אותנו איך הייתה החוויה. כל פידבק עוזר לנו לתת שירות טוב יותר. תודה! ❤️\nקישור למשוב: ${feedbackUrl}`
 
 
       try {

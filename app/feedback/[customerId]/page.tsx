@@ -13,7 +13,7 @@ const translations = {
     alreadySubmittedDesc: 'כבר הגשת משוב עבור משלוח זה.',
     appreciateInput: 'אנו מעריכים את תרומתך כדי לעזור לנו לשפר את השירותים שלנו.',
     deliveryFeedback: 'משוב משלוח',
-    howDidWeDo: 'המשוב שלך חשוב לנו! ❤️',
+    howDidWeDo: 'הדעה שלך\nחשובה לנו ❤️',
     greeting: 'תודה שבחרת בנו! נשמח מאוד אם תשתף אותנו בחוויה שלך – זה לוקח פחות מדקה.',
     deliveryTimeService: 'זמן משלוח ושירות',
     deliveryDesc: 'כמה מהיר ונוח היה תהליך המשלוח?',
@@ -37,7 +37,7 @@ const translations = {
     alreadySubmittedDesc: 'You have already submitted feedback for this delivery.',
     appreciateInput: 'We appreciate your input to help us improve our services.',
     deliveryFeedback: 'Delivery Feedback',
-    howDidWeDo: 'Your feedback is important to us. ❤️',
+    howDidWeDo: 'Your opinion\nis important to us. ❤️',
     greeting: 'Thank you for choosing us! We would love it if you would share your experience with us – it takes less than a minute.',
     deliveryTimeService: 'Delivery Time & Service',
     deliveryDesc: 'How fast and convenient was the delivery process?',
@@ -563,7 +563,7 @@ export default function FeedbackPage({ params }: FeedbackPageProps) {
             </svg>
             {t.deliveryFeedback}
           </div>
-          <h1 style={headingStyle}>{t.howDidWeDo}</h1>
+          <h1 style={{ ...headingStyle, whiteSpace: 'pre-line' }}>{t.howDidWeDo}</h1>
           <p style={greetingStyle}>{t.greeting}</p>
         </div>
 
