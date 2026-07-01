@@ -207,7 +207,7 @@ export default function CourierPage() {
                       <div className="flex flex-row justify-end items-center gap-2">
                         <button
                           onClick={() => handleCall(customer.id)}
-                          disabled={calling === customer.id || customer.is_completed}
+                          disabled={calling === customer.id}
                           className="w-full sm:w-auto rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-gray-400"
                         >
                           {calling === customer.id ? 'Calling...' : 'Call'}
