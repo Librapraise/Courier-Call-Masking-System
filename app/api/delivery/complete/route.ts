@@ -131,17 +131,21 @@ export async function POST(request: NextRequest) {
 
     console.log(`[API] /api/delivery/complete - Marked customer ${customerId} as completed with slug ${feedbackSlug}`)
 
-    // Send SMS via Twilio
+    // Send SMS and WhatsApp via Twilio
     const accountSid = process.env.TWILIO_ACCOUNT_SID
     const authToken = process.env.TWILIO_AUTH_TOKEN
     const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER
+    const twilioWhatsAppNumber = process.env.TWILIO_WHATSAPP_NUMBER || twilioPhoneNumber
 
     let smsSent = false
     let smsError = null
+    let whatsAppSent = false
+    let whatsAppError = null
 
     if (!accountSid || !authToken || !twilioPhoneNumber) {
-      console.error('[API] /api/delivery/complete - Twilio config missing, skipping SMS')
+      console.error('[API] /api/delivery/complete - Twilio config missing, skipping SMS and WhatsApp')
       smsError = 'Twilio credentials not configured'
+      whatsAppError = 'Twilio credentials not configured'
     } else {
       // Build feedback landing page URL (using a short path '/f/')
       let baseUrl = process.env.NEXT_PUBLIC_APP_URL || ''
@@ -156,8 +160,7 @@ export async function POST(request: NextRequest) {
       const client = twilio(accountSid, authToken)
       const smsBody = `לקוח יקר, החבילה שלך הגיעה! 📦\n\nנשמח אם תקדיש רגע ותשתף אותנו איך הייתה החוויה. כל פידבק עוזר לנו לתת שירות טוב יותר. תודה! ❤️\n\nקישור למשוב: ${feedbackUrl}\n\nלהסרה השב STOP`
 
-
-
+      // 1. Send SMS
       try {
         console.log(`[API] /api/delivery/complete - Sending SMS via Twilio to ${customer.phone_number.substring(0, 7)}****`)
         await retryOperation(
@@ -175,12 +178,33 @@ export async function POST(request: NextRequest) {
         console.error('[API] /api/delivery/complete - Twilio SMS sending failed:', err.message || err)
         smsError = err.message || String(err)
       }
+
+      // 2. Send WhatsApp
+      try {
+        console.log(`[API] /api/delivery/complete - Sending WhatsApp via Twilio to ${customer.phone_number.substring(0, 7)}****`)
+        await retryOperation(
+          () => client.messages.create({
+            to: `whatsapp:${customer.phone_number}`,
+            from: `whatsapp:${twilioWhatsAppNumber}`,
+            body: smsBody,
+          }),
+          3, // retries
+          1000 // initial delay
+        )
+        console.log('[API] /api/delivery/complete - WhatsApp sent successfully')
+        whatsAppSent = true
+      } catch (err: any) {
+        console.error('[API] /api/delivery/complete - Twilio WhatsApp sending failed:', err.message || err)
+        whatsAppError = err.message || String(err)
+      }
     }
 
     return NextResponse.json({
       success: true,
       smsSent,
       smsError,
+      whatsAppSent,
+      whatsAppError,
     })
   } catch (error: any) {
     console.error('[API] /api/delivery/complete - Unexpected error:', error.message || error)
