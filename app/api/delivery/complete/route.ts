@@ -158,45 +158,12 @@ export async function POST(request: NextRequest) {
       const feedbackUrl = `${baseUrl}/f/${feedbackSlug}`
 
       const client = twilio(accountSid, authToken)
-      const smsBody = `היי 😊 מה שלומך?
+      const smsBody = `היי!😊מקווים שנהנית מההזמנה 📦🎉
+איך היית מדרג/ת אותנו מ-1 עד 5? ⭐
+נשמח לשמוע איך היו זמני המשלוח, השירות של השליח ואיכות המוצר.
+זה לוקח פחות מדקה והמשוב שלך עוזר לנו להשתפר. ❤️👇`
 
-מקווה שהכול הגיע אליך בצורה מושלמת.
-
-אשמח אם תקדיש/י חצי דקה ותדרג/י את החוויה שלך מ-1 עד 10 ⭐
-
-בנוסף, נשמח לשמוע:
-✅ האם המשלוח הגיע בזמן?
-✅ איך היה השירות של השליח?
-✅ איך התרשמת מאיכות המוצר?
-
-בתור תודה על הזמן שלך, לאחר שליחת המשוב תקבל/י מאיתנו הטבה לרכישה הבאה. 🎁
-
-המשוב שלך חשוב לנו ועוזר לנו להמשיך להעניק שירות ומוצרים ברמה הגבוהה ביותר. תודה רבה! 💙
-
-קישור למשוב: ${feedbackUrl}
-
-להסרה השב STOP`
-
-      // 1. Send SMS
-      try {
-        console.log(`[API] /api/delivery/complete - Sending SMS via Twilio to ${customer.phone_number.substring(0, 7)}****`)
-        await retryOperation(
-          () => client.messages.create({
-            to: customer.phone_number,
-            from: twilioPhoneNumber,
-            body: smsBody,
-          }),
-          3, // retries
-          1000 // initial delay
-        )
-        console.log('[API] /api/delivery/complete - SMS sent successfully')
-        smsSent = true
-      } catch (err: any) {
-        console.error('[API] /api/delivery/complete - Twilio SMS sending failed:', err.message || err)
-        smsError = err.message || String(err)
-      }
-
-      // 2. Send WhatsApp
+      // 1. Send WhatsApp first
       try {
         console.log(`[API] /api/delivery/complete - Sending WhatsApp via Twilio to ${customer.phone_number.substring(0, 7)}****`)
         const whatsAppTemplateSid = process.env.TWILIO_WHATSAPP_TEMPLATE_SID
@@ -229,8 +196,27 @@ export async function POST(request: NextRequest) {
         console.log('[API] /api/delivery/complete - WhatsApp sent successfully')
         whatsAppSent = true
       } catch (err: any) {
-        console.error('[API] /api/delivery/complete - Twilio WhatsApp sending failed:', err.message || err)
+        console.error('[API] /api/delivery/complete - Twilio WhatsApp sending failed, falling back to SMS:', err.message || err)
         whatsAppError = err.message || String(err)
+
+        // Fallback: Send SMS
+        try {
+          console.log(`[API] /api/delivery/complete - Sending fallback SMS via Twilio to ${customer.phone_number.substring(0, 7)}****`)
+          await retryOperation(
+            () => client.messages.create({
+              to: customer.phone_number,
+              from: twilioPhoneNumber,
+              body: `${smsBody}\n\nקישור למשוב: ${feedbackUrl}`,
+            }),
+            3, // retries
+            1000 // initial delay
+          )
+          console.log('[API] /api/delivery/complete - Fallback SMS sent successfully')
+          smsSent = true
+        } catch (smsErr: any) {
+          console.error('[API] /api/delivery/complete - Twilio fallback SMS sending failed:', smsErr.message || smsErr)
+          smsError = smsErr.message || String(smsErr)
+        }
       }
     }
 
