@@ -132,10 +132,10 @@ export async function POST(request: NextRequest) {
     console.log(`[API] /api/delivery/complete - Marked customer ${customerId} as completed with slug ${feedbackSlug}`)
 
     // Send SMS and WhatsApp via Twilio
-    const accountSid = process.env.TWILIO_ACCOUNT_SID
-    const authToken = process.env.TWILIO_AUTH_TOKEN
-    const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER
-    const twilioWhatsAppNumber = process.env.TWILIO_WHATSAPP_NUMBER || twilioPhoneNumber
+    const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim()
+    const authToken = process.env.TWILIO_AUTH_TOKEN?.trim()
+    const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER?.split('#')[0].trim()
+    const twilioWhatsAppNumber = (process.env.TWILIO_WHATSAPP_NUMBER?.split('#')[0].trim()) || twilioPhoneNumber
 
     let smsSent = false
     let smsError = null
@@ -163,37 +163,42 @@ export async function POST(request: NextRequest) {
 נשמח לשמוע איך היו זמני המשלוח, השירות של השליח ואיכות המוצר.
 זה לוקח פחות מדקה והמשוב שלך עוזר לנו להשתפר. ❤️👇`
 
+      const statusCallbackUrl = `${baseUrl}/api/delivery/status-callback?customerId=${customerId}`
+
       // 1. Send WhatsApp first
       try {
         console.log(`[API] /api/delivery/complete - Sending WhatsApp via Twilio to ${customer.phone_number.substring(0, 7)}****`)
         const whatsAppTemplateSid = process.env.TWILIO_WHATSAPP_TEMPLATE_SID
 
+        let message: any;
         if (whatsAppTemplateSid) {
-          await retryOperation(
+
+          console.log('[API] /api/delivery/complete - Sending WhatsApp (0-variable template)')
+
+          message = await retryOperation(
             () => client.messages.create({
               to: `whatsapp:${customer.phone_number}`,
               from: `whatsapp:${twilioWhatsAppNumber}`,
               contentSid: whatsAppTemplateSid,
-              contentVariables: JSON.stringify({
-                "1": feedbackUrl
-              })
+              statusCallback: statusCallbackUrl
             }),
             3, // retries
             1000 // initial delay
           )
         } else {
           // Fallback to freeform body if no template is configured (requires active session)
-          await retryOperation(
+          message = await retryOperation(
             () => client.messages.create({
               to: `whatsapp:${customer.phone_number}`,
               from: `whatsapp:${twilioWhatsAppNumber}`,
               body: smsBody,
+              statusCallback: statusCallbackUrl
             }),
             3, // retries
             1000 // initial delay
           )
         }
-        console.log('[API] /api/delivery/complete - WhatsApp sent successfully')
+        console.log(`[API] /api/delivery/complete - WhatsApp message queued. SID: ${message.sid}, Status: ${message.status}`)
         whatsAppSent = true
       } catch (err: any) {
         console.error('[API] /api/delivery/complete - Twilio WhatsApp sending failed, falling back to SMS:', err.message || err)

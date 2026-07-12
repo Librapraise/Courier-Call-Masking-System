@@ -124,12 +124,15 @@ export default function CourierPage() {
         prev.map(c => c.id === customerId ? { ...c, is_completed: true } : c)
       )
 
-      if (result.smsSent) {
-        setMessage({ type: 'success', text: 'Delivery marked as completed and feedback SMS sent to customer!' })
+      if (result.whatsAppSent) {
+        setMessage({ type: 'success', text: 'Delivery completed successfully and feedback WhatsApp sent to customer!' })
+      } else if (result.smsSent) {
+        setMessage({ type: 'success', text: 'Delivery completed successfully and feedback SMS sent to customer!' })
       } else {
+        const errorDetail = result.whatsAppError || result.smsError || 'Unknown Twilio error'
         setMessage({
           type: 'success',
-          text: `Delivery completed successfully! (Note: SMS failed to send: ${result.smsError || 'Unknown Twilio error'})`,
+          text: `Delivery completed successfully! (Note: SMS and WhatsApp failed to send: ${errorDetail})`,
         })
       }
     } catch (err: any) {
