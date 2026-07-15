@@ -30,6 +30,8 @@ export async function GET(request: NextRequest) {
     const updatedContactsList: any[] = []
     let hasMore = true
 
+    const allContactsDebug: any[] = []
+
     console.log(`[API] /api/chatwoot-sync-past - Fetching contacts for account ${accountId} starting from page ${page}`)
 
     while (hasMore && page <= 10) { // Limit to 10 pages safety
@@ -57,6 +59,13 @@ export async function GET(request: NextRequest) {
       }
 
       for (const contact of contacts) {
+        allContactsDebug.push({
+          id: contact.id,
+          name: contact.name,
+          phone_number: contact.phone_number,
+          contact_inboxes: contact.contact_inboxes?.map((ci: any) => ci.source_id)
+        })
+
         // If phone number is empty/blank
         if (!contact.phone_number) {
           const whatsappInbox = contact.contact_inboxes?.find((item: any) => 
@@ -111,7 +120,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: `Completed sync. Updated ${totalUpdated} existing contacts.`,
-      updatedContacts: updatedContactsList
+      updatedContacts: updatedContactsList,
+      debugAllContacts: allContactsDebug
     }, { status: 200 })
 
   } catch (error: any) {
