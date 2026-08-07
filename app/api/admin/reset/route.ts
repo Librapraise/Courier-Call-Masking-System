@@ -111,6 +111,9 @@ export async function POST(request: NextRequest) {
         twilio_call_sid: log.twilio_call_sid,
         agent_name: log.agent_name,
         error_message: log.error_message,
+        recording_url: log.recording_url || null,
+        recording_sid: log.recording_sid || null,
+        recording_duration: log.recording_duration || null,
         archive_date: archiveDate,
       }))
 

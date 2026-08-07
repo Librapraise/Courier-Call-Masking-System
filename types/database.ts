@@ -51,6 +51,9 @@ export interface CallLog {
   call_duration: number | null
   twilio_call_sid: string | null
   error_message: string | null
+  recording_url?: string | null
+  recording_sid?: string | null
+  recording_duration?: number | null
   created_at: string
   updated_at: string | null
 }
@@ -77,6 +80,9 @@ export interface ArchivedCall {
   twilio_call_sid: string | null
   agent_name: string | null
   error_message: string | null
+  recording_url?: string | null
+  recording_sid?: string | null
+  recording_duration?: number | null
   archived_at: string
   archive_date: string
 }

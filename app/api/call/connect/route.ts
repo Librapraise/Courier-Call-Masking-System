@@ -158,12 +158,18 @@ async function handleConnectWebhook(request: NextRequest) {
     // TwiML to connect the call
     // When courier answers, connect them to the customer
     twiml = new twilio.twiml.VoiceResponse()
+
+    // Determine public app URL for recording status callback
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin).replace(/\/$/, '')
+    const recordingStatusCallbackUrl = `${appUrl}/api/call/recording`
     
-    // Dial the customer's phone number with caller ID masking
+    // Dial the customer's phone number with caller ID masking and call recording enabled
     // Customer will see the business number, not the courier's real number
     const dial = twiml.dial({
       callerId: businessPhone, // Mask caller ID to show business number
-      record: 'do-not-record', // Don't record calls by default
+      record: 'record-from-answer-dual', // Record dual channel conversation when call is answered
+      recordingStatusCallback: recordingStatusCallbackUrl,
+      recordingStatusCallbackMethod: 'POST',
       timeout: 30, // Wait up to 30 seconds for answer
     })
     dial.number(customerPhone)
@@ -177,7 +183,8 @@ async function handleConnectWebhook(request: NextRequest) {
       customerPhoneFormat: 'E.164 ✓',
       businessPhoneFormat: 'E.164 ✓',
       dialTimeout: '30 seconds',
-      callerIdMasking: 'enabled'
+      callerIdMasking: 'enabled',
+      recording: 'record-from-answer-dual'
     })
     
     return new NextResponse(twimlString, {

@@ -12,6 +12,8 @@ export default function CallLogsPage() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<string>('all')
   const [dateFilter, setDateFilter] = useState<string>('today')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -118,7 +120,7 @@ export default function CallLogsPage() {
   }
 
   const handleExportCSV = () => {
-    const headers = ['Customer Name', 'Phone (Masked)', 'Agent', 'Status', 'Duration (s)', 'Timestamp', 'Error']
+    const headers = ['Customer Name', 'Phone (Masked)', 'Agent', 'Status', 'Duration (s)', 'Timestamp', 'Error', 'Recording URL']
     const rows = logs.map(log => [
       log.customer_name || '',
       log.customer_phone_masked || '',
@@ -127,6 +129,7 @@ export default function CallLogsPage() {
       log.call_duration?.toString() || '',
       log.call_timestamp ? new Date(log.call_timestamp).toLocaleString() : '',
       log.error_message || '',
+      log.recording_url || '',
     ])
 
     const csvContent = [
@@ -143,6 +146,41 @@ export default function CallLogsPage() {
     a.click()
     document.body.removeChild(a)
     window.URL.revokeObjectURL(url)
+  }
+
+  const handleDeleteRecording = async (log: CallLog) => {
+    if (!log.recording_sid) return
+    setDeletingId(log.id)
+    setConfirmDeleteId(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const response = await fetch('/api/call/recording', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callLogId: log.id,
+          recordingSid: log.recording_sid,
+          accessToken: session?.access_token,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        console.error('[Admin] Failed to delete recording:', result.error)
+        alert(`Failed to delete recording: ${result.error}`)
+        return
+      }
+      // Optimistically remove the recording from local state
+      setLogs(prev => prev.map(l =>
+        l.id === log.id
+          ? { ...l, recording_url: null, recording_sid: null, recording_duration: null }
+          : l
+      ))
+    } catch (err: any) {
+      console.error('[Admin] Error deleting recording:', err)
+      alert('An unexpected error occurred while deleting the recording.')
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   const handleLogout = async () => {
@@ -292,6 +330,9 @@ export default function CallLogsPage() {
                 <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hidden sm:table-cell">
                   Duration
                 </th>
+                <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Recording
+                </th>
                 <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hidden lg:table-cell">
                   Timestamp
                 </th>
@@ -303,7 +344,7 @@ export default function CallLogsPage() {
             <tbody className="divide-y divide-gray-200 bg-white">
               {logs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
+                  <td colSpan={8} className="px-4 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
                     No call logs found
                   </td>
                 </tr>
@@ -330,6 +371,49 @@ export default function CallLogsPage() {
                     </td>
                     <td className="hidden sm:table-cell px-6 py-4 text-sm text-gray-500">
                       {log.call_duration ? `${log.call_duration}s` : '-'}
+                    </td>
+                    <td className="px-3 sm:px-6 py-4 text-xs sm:text-sm">
+                      {log.recording_url ? (
+                        <div className="flex items-center gap-2">
+                          <audio
+                            controls
+                            src={log.recording_url}
+                            preload="none"
+                            className="h-8 max-w-[200px] sm:max-w-[240px]"
+                          />
+                          {confirmDeleteId === log.id ? (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => handleDeleteRecording(log)}
+                                disabled={deletingId === log.id}
+                                className="text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                                title="Confirm delete"
+                              >
+                                {deletingId === log.id ? 'Deleting...' : 'Confirm'}
+                              </button>
+                              <button
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="text-xs px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmDeleteId(log.id)}
+                              disabled={deletingId === log.id}
+                              className="p-1 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50 flex-shrink-0"
+                              title="Delete recording"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 text-xs">No recording</span>
+                      )}
                     </td>
                     <td className="hidden lg:table-cell px-6 py-4 text-sm text-gray-500">
                       {log.call_timestamp
