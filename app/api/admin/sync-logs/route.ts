@@ -121,7 +121,8 @@ export async function POST(request: NextRequest) {
           if (recordings && recordings.length > 0) {
             // Find completed recording
             const validRec = recordings.find(r => r.status === 'completed') || recordings[0]
-            const recUri = `https://api.twilio.com${validRec.uri.replace('.json', '.mp3')}`
+            const rawUri = validRec.uri.endsWith('.json') ? validRec.uri.slice(0, -5) : validRec.uri
+            const recUri = `https://api.twilio.com${rawUri}.mp3`
             
             updatePayload.recording_url = recUri
             updatePayload.recording_sid = validRec.sid
