@@ -94,7 +94,14 @@ export default function CallLogsPage() {
   const handleSyncTwilio = async () => {
     try {
       setIsSyncing(true)
-      const res = await fetch('/api/admin/sync-logs', { method: 'POST' })
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/admin/sync-logs', { 
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
+        }
+      })
       const data = await res.json()
       if (res.ok) {
         await fetchLogs()

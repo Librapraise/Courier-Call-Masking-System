@@ -9,21 +9,33 @@ import { cookies } from 'next/headers'
  */
 export async function POST(request: NextRequest) {
   try {
-    // 1. Verify admin authorization using request cookies & getUser()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return request.cookies.getAll()
-          },
-          setAll() {},
-        },
-      }
-    )
+    // 1. Verify admin authorization using Bearer token or request cookies
+    let user = null
+    const authHeader = request.headers.get('Authorization')
 
-    const { data: { user } } = await supabase.auth.getUser()
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7)
+      const { data } = await supabaseAdmin.auth.getUser(token)
+      user = data.user
+    }
+
+    if (!user) {
+      const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          cookies: {
+            getAll() {
+              return request.cookies.getAll()
+            },
+            setAll() {},
+          },
+        }
+      )
+      const { data } = await supabase.auth.getUser()
+      user = data.user
+    }
+
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
