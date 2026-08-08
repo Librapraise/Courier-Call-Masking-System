@@ -181,7 +181,6 @@ export async function POST(request: NextRequest) {
     // Validate webhook URL (Twilio requires publicly accessible URL)
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
     const connectWebhookUrl = `${appUrl}/api/call/connect?customerPhone=${encodeURIComponent(customer.phone_number)}&customerId=${customerId}&courierId=${user.id}`
-    const statusCallbackUrl = `${appUrl}/api/call/status`
     
     // Check if using localhost (Twilio can't reach localhost)
     if (connectWebhookUrl.includes('localhost') || connectWebhookUrl.includes('127.0.0.1')) {
@@ -197,7 +196,6 @@ export async function POST(request: NextRequest) {
 
     console.log('[API] /api/call/initiate - Webhook URLs configured:', { 
       connectWebhookUrl, 
-      statusCallbackUrl,
       appUrl: appUrl,
       isProduction: process.env.NODE_ENV === 'production'
     })
@@ -223,6 +221,29 @@ export async function POST(request: NextRequest) {
       customerName: customer.name,
       agentName
     })
+
+    // Create the log before calling Twilio. Status callbacks can arrive before
+    // calls.create() returns, so the callback needs a stable row ID to update.
+    const { data: pendingLog, error: pendingLogError } = await supabaseAdmin
+      .from('call_logs')
+      .insert({
+        customer_id: customerId,
+        customer_name: customer.name,
+        customer_phone_masked: maskPhoneNumber(customer.phone_number),
+        courier_id: user.id,
+        agent_name: agentName,
+        call_status: 'attempted',
+        call_timestamp: new Date().toISOString(),
+      })
+      .select('id')
+      .single()
+
+    if (pendingLogError || !pendingLog) {
+      console.error('[API] /api/call/initiate - Failed to create pending call log:', pendingLogError)
+      return NextResponse.json({ error: 'Failed to create call log' }, { status: 500 })
+    }
+
+    const statusCallbackUrl = `${appUrl}/api/call/status?callLogId=${encodeURIComponent(pendingLog.id)}`
 
     // Initiate Twilio call with retry logic
     // Call flow: Courier's phone → Twilio number → Customer's phone
@@ -253,17 +274,10 @@ export async function POST(request: NextRequest) {
       })
       console.log('[API] /api/call/initiate - Webhook URL that will be called:', connectWebhookUrl)
 
-      // Log comprehensive call information
-      const logResult = await supabaseAdmin.from('call_logs').insert({
-        customer_id: customerId,
-        customer_name: customer.name,
-        customer_phone_masked: maskPhoneNumber(customer.phone_number),
-        courier_id: user.id,
-        agent_name: agentName,
-        call_status: 'attempted',
-        call_timestamp: new Date().toISOString(),
+      const logResult = await supabaseAdmin.from('call_logs').update({
         twilio_call_sid: call.sid,
-      })
+        updated_at: new Date().toISOString(),
+      }).eq('id', pendingLog.id)
 
       if (logResult.error) {
         console.error('[API] /api/call/initiate - Failed to log call:', logResult.error)
@@ -305,17 +319,12 @@ export async function POST(request: NextRequest) {
         userFriendlyMessage = `Failed to initiate call: ${errorMessage}`
       }
 
-      // Log failed call attempt with error details
-      const logResult = await supabaseAdmin.from('call_logs').insert({
-        customer_id: customerId,
-        customer_name: customer.name,
-        customer_phone_masked: maskPhoneNumber(customer.phone_number),
-        courier_id: user.id,
-        agent_name: agentName,
+      // Mark the pending log as failed rather than creating a duplicate row.
+      const logResult = await supabaseAdmin.from('call_logs').update({
         call_status: 'failed',
-        call_timestamp: new Date().toISOString(),
         error_message: errorMessage,
-      })
+        updated_at: new Date().toISOString(),
+      }).eq('id', pendingLog.id)
 
       if (logResult.error) {
         console.error('[API] /api/call/initiate - Failed to log failed call:', logResult.error)
@@ -334,4 +343,3 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-

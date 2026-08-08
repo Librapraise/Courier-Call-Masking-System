@@ -33,6 +33,7 @@ export async function POST(request: NextRequest) {
       }
     }
     const callSid = formData.get('CallSid') as string
+    const callLogId = request.nextUrl.searchParams.get('callLogId')
     const callStatus = formData.get('CallStatus') as string
     const callDuration = formData.get('CallDuration') as string | null
     const from = formData.get('From') as string | null
@@ -67,15 +68,16 @@ export async function POST(request: NextRequest) {
 
     console.log('[API] /api/call/status - Mapped status:', { twilioStatus: callStatus, internalStatus })
 
-    // Find existing call log by Twilio SID
-    const { data: existingLog } = await supabaseAdmin
-      .from('call_logs')
-      .select('id')
-      .eq('twilio_call_sid', callSid)
-      .single()
+    // Prefer the stable row ID embedded in the callback URL. Falling back to
+    // the SID keeps callbacks from calls created by older deployments working.
+    const existingQuery = supabaseAdmin.from('call_logs').select('id')
+    const { data: existingLog } = callLogId
+      ? await existingQuery.eq('id', callLogId).maybeSingle()
+      : await existingQuery.eq('twilio_call_sid', callSid).maybeSingle()
 
     const updateData: any = {
       call_status: internalStatus,
+      twilio_call_sid: callSid,
       updated_at: new Date().toISOString(),
     }
 
@@ -128,4 +130,3 @@ export async function POST(request: NextRequest) {
     return new NextResponse('Internal Server Error', { status: 500 })
   }
 }
-

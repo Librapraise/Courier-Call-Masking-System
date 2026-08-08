@@ -23,9 +23,13 @@ export async function validateTwilioWebhook(
     return false
   }
 
-  // Get the full URL (without query params for POST requests)
-  const url = new URL(request.url)
-  const baseUrl = `${url.protocol}//${url.host}${url.pathname}`
+  // Validate against the same public URL sent to Twilio. On hosted platforms,
+  // request.url can contain an internal host/protocol that Twilio did not sign.
+  const incomingUrl = new URL(request.url)
+  const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '')
+  const callbackUrl = configuredOrigin
+    ? `${configuredOrigin}${incomingUrl.pathname}${incomingUrl.search}`
+    : request.url
 
   // For POST requests, get form data
   if (request.method === 'POST') {
@@ -37,12 +41,9 @@ export async function validateTwilioWebhook(
         params[key] = value.toString()
       })
       
-      // Also include query params if any
-      request.nextUrl.searchParams.forEach((value, key) => {
-        params[key] = value
-      })
-
-      return twilio.validateRequest(authToken, signature, baseUrl, params)
+      // Query parameters are already part of callbackUrl. Twilio's validator
+      // expects only form fields here; adding query fields counts them twice.
+      return twilio.validateRequest(authToken, signature, callbackUrl, params)
     } catch (error) {
       console.error('Twilio signature validation error:', error)
       return false
@@ -50,7 +51,7 @@ export async function validateTwilioWebhook(
   } else {
     // For GET requests, use query params
     const params = Object.fromEntries(request.nextUrl.searchParams.entries())
-    return twilio.validateRequest(authToken, signature, baseUrl, params)
+    return twilio.validateRequest(authToken, signature, callbackUrl, params)
   }
 }
 
@@ -87,4 +88,3 @@ export async function retryOperation<T>(
   
   throw lastError || new Error('Operation failed after retries')
 }
-

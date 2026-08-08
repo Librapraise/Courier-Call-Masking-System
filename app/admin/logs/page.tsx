@@ -377,7 +377,7 @@ export default function CallLogsPage() {
                         <div className="flex items-center gap-2">
                           <audio
                             controls
-                            src={log.recording_url}
+                            src={`/api/call/recording/stream/${log.id}`}
                             preload="none"
                             className="h-8 max-w-[200px] sm:max-w-[240px]"
                           />
