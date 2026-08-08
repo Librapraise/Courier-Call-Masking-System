@@ -60,12 +60,14 @@ export async function POST(request: NextRequest) {
 
     const client = twilio(accountSid, authToken)
 
-    // 3. Find logs that need syncing (status is attempted/ringing OR missing recording)
+    // 3. Find logs that need syncing:
+    //    a) still stuck on attempted/ringing
+    //    b) completed but missing a recording URL (common with <Dial> two-leg calls)
     const { data: logsToSync, error: fetchError } = await supabaseAdmin
       .from('call_logs')
       .select('id, twilio_call_sid, call_status, recording_url')
       .not('twilio_call_sid', 'is', null)
-      .or('call_status.in.(attempted,ringing),recording_url.is.null')
+      .or('call_status.in.(attempted,ringing),and(call_status.eq.completed,recording_url.is.null)')
       .order('created_at', { ascending: false })
       .limit(50)
 
@@ -115,18 +117,31 @@ export async function POST(request: NextRequest) {
         }
 
         // Check for recordings if missing
+        // For <Dial record="record-from-answer-dual"> calls, the recording is on the
+        // CHILD call leg, not the parent SID. So we search both by callSid and parentCallSid.
         if (!log.recording_url && (call.status === 'completed' || call.status === 'in-progress')) {
-          const recordings = await client.calls(log.twilio_call_sid).recordings.list({ limit: 5 })
-          
+          let recordings: any[] = await client.calls(log.twilio_call_sid).recordings.list({ limit: 5 })
+
+          // If none found on parent call, try searching account recordings by parentCallSid
+          if (!recordings || recordings.length === 0) {
+            recordings = await client.recordings.list({
+              callSid: log.twilio_call_sid,
+              limit: 5,
+            } as any)
+          }
+
           if (recordings && recordings.length > 0) {
-            // Find completed recording
-            const validRec = recordings.find(r => r.status === 'completed') || recordings[0]
+            const validRec = recordings.find((r: any) => r.status === 'completed') || recordings[0]
             const rawUri = validRec.uri.endsWith('.json') ? validRec.uri.slice(0, -5) : validRec.uri
             const recUri = `https://api.twilio.com${rawUri}.mp3`
-            
+
             updatePayload.recording_url = recUri
             updatePayload.recording_sid = validRec.sid
             updatePayload.recording_duration = validRec.duration ? parseInt(validRec.duration, 10) : null
+
+            console.log(`[API] /api/admin/sync-logs - Found recording for ${log.twilio_call_sid}:`, recUri)
+          } else {
+            console.log(`[API] /api/admin/sync-logs - No recordings found for call SID:`, log.twilio_call_sid)
           }
         }
 
