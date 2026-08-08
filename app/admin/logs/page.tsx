@@ -14,6 +14,7 @@ export default function CallLogsPage() {
   const [dateFilter, setDateFilter] = useState<string>('today')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [isSyncing, setIsSyncing] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -43,12 +44,10 @@ export default function CallLogsPage() {
     try {
       setLoading(true)
       
-      // Start with a simple query to test access
       let query = supabase
         .from('call_logs')
         .select('*')
 
-      // Apply status filter first (simpler)
       if (filter !== 'all') {
         if (filter === 'success') {
           query = query.in('call_status', ['completed', 'connected'])
@@ -59,7 +58,6 @@ export default function CallLogsPage() {
         }
       }
 
-      // Calculate date range and apply filter
       if (dateFilter !== 'all') {
         const today = new Date()
         today.setHours(0, 0, 0, 0)
@@ -68,54 +66,45 @@ export default function CallLogsPage() {
         if (dateFilter === 'today') {
           startDate = today
         } else {
-          // week
           startDate = new Date(today)
           startDate.setDate(today.getDate() - 7)
         }
 
-        // Use created_at for filtering (guaranteed to exist)
-        // If call_timestamp exists and has values, we can filter by it in post-processing
         query = query.gte('created_at', startDate.toISOString())
       }
 
-      // Order by created_at (always exists)
       query = query.order('created_at', { ascending: false }).limit(1000)
 
       const { data, error } = await query
 
       if (error) {
-        // Better error logging for Supabase errors
-        const errorInfo = {
-          message: error.message || 'Unknown error',
-          details: error.details || 'No details',
-          hint: error.hint || 'No hint',
-          code: error.code || 'No code',
-        }
-        console.error('Supabase query error:', errorInfo)
-        console.error('Raw error object keys:', Object.keys(error))
-        
-        // Check if it's a column/table issue
-        if (error.message?.includes('column') || error.code === 'PGRST116') {
-          console.warn('Possible migration issue: Column or table may not exist. Please run migration_milestone2.sql')
-        }
-        
+        console.error('Supabase query error:', error)
         throw new Error(error.message || 'Failed to fetch call logs')
       }
       
       setLogs(data || [])
     } catch (err: any) {
       console.error('Error fetching logs:', err)
-      
-      // Try to extract meaningful error message
-      const errorMessage = err?.message || err?.toString() || 'Unknown error occurred'
-      console.error('Error message:', errorMessage)
-      
-      // Set empty array on error to prevent UI crash
       setLogs([])
-      
-      // Optionally show error to user (you can add a toast/alert here)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSyncTwilio = async () => {
+    try {
+      setIsSyncing(true)
+      const res = await fetch('/api/admin/sync-logs', { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        await fetchLogs()
+      } else {
+        alert(`Sync failed: ${data.error || 'Unknown error'}`)
+      }
+    } catch (err: any) {
+      console.error('Sync error:', err)
+    } finally {
+      setIsSyncing(false)
     }
   }
 
@@ -153,23 +142,19 @@ export default function CallLogsPage() {
     setDeletingId(log.id)
     setConfirmDeleteId(null)
     try {
-      const { data: { session } } = await supabase.auth.getSession()
       const response = await fetch('/api/call/recording', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          callLogId: log.id,
+          logId: log.id,
           recordingSid: log.recording_sid,
-          accessToken: session?.access_token,
         }),
       })
       const result = await response.json()
       if (!response.ok) {
-        console.error('[Admin] Failed to delete recording:', result.error)
-        alert(`Failed to delete recording: ${result.error}`)
+        alert(result.error || 'Failed to delete recording')
         return
       }
-      // Optimistically remove the recording from local state
       setLogs(prev => prev.map(l =>
         l.id === log.id
           ? { ...l, recording_url: null, recording_sid: null, recording_duration: null }
@@ -201,7 +186,6 @@ export default function CallLogsPage() {
     return 'bg-gray-100 text-gray-800'
   }
 
-  // Calculate summary stats
   const totalCalls = logs.length
   const successfulCalls = logs.filter(log => 
     ['completed', 'connected'].includes(log.call_status)
@@ -242,12 +226,21 @@ export default function CallLogsPage() {
               View and export call history
             </p>
           </div>
-          <button
-            onClick={handleExportCSV}
-            className="rounded-md bg-green-600 px-4 py-2 text-sm sm:text-base text-white hover:bg-green-700"
-          >
-            Export CSV
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSyncTwilio}
+              disabled={isSyncing}
+              className="inline-flex items-center rounded-md border border-blue-600 bg-blue-50 px-4 py-2 text-sm sm:text-base font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+            >
+              {isSyncing ? 'Syncing...' : 'Sync with Twilio'}
+            </button>
+            <button
+              onClick={handleExportCSV}
+              className="rounded-md bg-green-600 px-4 py-2 text-sm sm:text-base text-white hover:bg-green-700"
+            >
+              Export CSV
+            </button>
+          </div>
         </div>
 
         {/* Summary Stats */}
@@ -401,35 +394,24 @@ export default function CallLogsPage() {
                           ) : (
                             <button
                               onClick={() => setConfirmDeleteId(log.id)}
-                              disabled={deletingId === log.id}
-                              className="p-1 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50 flex-shrink-0"
+                              className="text-gray-400 hover:text-red-600 p-1"
                               title="Delete recording"
                             >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                               </svg>
                             </button>
                           )}
                         </div>
                       ) : (
-                        <span className="text-gray-400 text-xs">No recording</span>
+                        <span className="text-gray-400 italic">No recording</span>
                       )}
                     </td>
                     <td className="hidden lg:table-cell px-6 py-4 text-sm text-gray-500">
-                      {log.call_timestamp
-                        ? new Date(log.call_timestamp).toLocaleString()
-                        : '-'}
+                      {log.call_timestamp ? new Date(log.call_timestamp).toLocaleString() : '-'}
                     </td>
-                    <td className="hidden xl:table-cell px-6 py-4 text-sm text-gray-500">
-                      {log.error_message ? (
-                        <span className="text-red-600" title={log.error_message}>
-                          {log.error_message.length > 50
-                            ? log.error_message.substring(0, 50) + '...'
-                            : log.error_message}
-                        </span>
-                      ) : (
-                        '-'
-                      )}
+                    <td className="hidden xl:table-cell px-6 py-4 text-sm text-red-600">
+                      {log.error_message || '-'}
                     </td>
                   </tr>
                 ))
@@ -441,4 +423,3 @@ export default function CallLogsPage() {
     </div>
   )
 }
-
