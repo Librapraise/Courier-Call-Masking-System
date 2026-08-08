@@ -54,7 +54,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (range) upstreamHeaders.Range = range
 
   const credentials = `${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`
+
+  // First fetch the Twilio URL (may redirect to CDN - follow redirects)
   const upstream = await fetch(log.recording_url, {
+    redirect: 'follow',
     headers: {
       ...upstreamHeaders,
       Authorization: `Basic ${Buffer.from(credentials).toString('base64')}`,
