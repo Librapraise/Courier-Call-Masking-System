@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS customers (
 -- Create call_logs table
 CREATE TABLE IF NOT EXISTS call_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
+  customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
   courier_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   call_status TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

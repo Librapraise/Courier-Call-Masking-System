@@ -12,6 +12,7 @@ export default function CallLogsPage() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<string>('all')
   const [dateFilter, setDateFilter] = useState<string>('today')
+  const [searchQuery, setSearchQuery] = useState<string>('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [isSyncing, setIsSyncing] = useState(false)
@@ -22,6 +23,19 @@ export default function CallLogsPage() {
     checkAuth()
     fetchLogs()
   }, [filter, dateFilter])
+
+  const filteredLogs = logs.filter((log) => {
+    if (!searchQuery.trim()) return true
+    const q = searchQuery.toLowerCase()
+    return (
+      (log.customer_name && log.customer_name.toLowerCase().includes(q)) ||
+      (log.customer_phone_masked && log.customer_phone_masked.toLowerCase().includes(q)) ||
+      (log.agent_name && log.agent_name.toLowerCase().includes(q)) ||
+      (log.call_status && log.call_status.toLowerCase().includes(q)) ||
+      (log.twilio_call_sid && log.twilio_call_sid.toLowerCase().includes(q)) ||
+      (log.error_message && log.error_message.toLowerCase().includes(q))
+    )
+  })
 
   const checkAuth = async () => {
     const { data: { session } } = await supabase.auth.getSession()
@@ -98,11 +112,12 @@ export default function CallLogsPage() {
     try {
       setIsSyncing(true)
       const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
       const res = await fetch('/api/admin/sync-logs', { 
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
+          'Authorization': `Bearer ${token}`
         }
       })
       const data = await res.json()
@@ -120,7 +135,7 @@ export default function CallLogsPage() {
 
   const handleExportCSV = () => {
     const headers = ['Customer Name', 'Phone (Masked)', 'Agent', 'Status', 'Duration (s)', 'Timestamp', 'Error', 'Recording URL']
-    const rows = logs.map(log => [
+    const rows = filteredLogs.map(log => [
       log.customer_name || '',
       log.customer_phone_masked || '',
       log.agent_name || '',
@@ -196,11 +211,11 @@ export default function CallLogsPage() {
     return 'bg-gray-100 text-gray-800'
   }
 
-  const totalCalls = logs.length
-  const successfulCalls = logs.filter(log => 
+  const totalCalls = filteredLogs.length
+  const successfulCalls = filteredLogs.filter(log => 
     ['completed', 'connected'].includes(log.call_status)
   ).length
-  const failedCalls = logs.filter(log => 
+  const failedCalls = filteredLogs.filter(log => 
     ['failed', 'no-answer', 'busy'].includes(log.call_status)
   ).length
   const successRate = totalCalls > 0 ? Math.round((successfulCalls / totalCalls) * 100) : 0
@@ -273,9 +288,33 @@ export default function CallLogsPage() {
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="mb-6 flex flex-col sm:flex-row gap-4">
-          <div className="flex-1">
+        {/* Search & Filters */}
+        <div className="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label htmlFor="search-input" className="block text-xs sm:text-sm font-medium text-gray-700">
+              Search Calls
+            </label>
+            <div className="relative mt-1">
+              <input
+                id="search-input"
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search name, phone, agent, status..."
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-xs text-gray-400 hover:text-gray-600"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div>
             <label htmlFor="status-filter" className="block text-xs sm:text-sm font-medium text-gray-700">
               Status Filter
             </label>
@@ -296,7 +335,8 @@ export default function CallLogsPage() {
               <option value="busy">Busy</option>
             </select>
           </div>
-          <div className="flex-1">
+          
+          <div>
             <label htmlFor="date-filter" className="block text-xs sm:text-sm font-medium text-gray-700">
               Date Range
             </label>
@@ -345,14 +385,14 @@ export default function CallLogsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white">
-              {logs.length === 0 ? (
+              {filteredLogs.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-4 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
                     No call logs found
                   </td>
                 </tr>
               ) : (
-                logs.map((log) => (
+                filteredLogs.map((log) => (
                   <tr key={log.id}>
                     <td className="px-3 sm:px-6 py-4 text-xs sm:text-sm font-medium text-gray-900">
                       <div className="flex flex-col">
