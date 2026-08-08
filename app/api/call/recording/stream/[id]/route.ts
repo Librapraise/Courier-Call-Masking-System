@@ -6,6 +6,8 @@ export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+
+  // Auth: check bearer token first, then cookies
   let user = null
   const authHeader = request.headers.get('Authorization')
   if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -23,28 +25,61 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     user = data.user
   }
 
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!user) {
+    console.error('[Stream] Unauthorized – no user found')
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
 
   const { data: profile } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).single()
-  if (profile?.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (profile?.role !== 'admin') {
+    console.error('[Stream] Forbidden – user is not admin:', user.id)
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
-  const { data: log, error } = await supabaseAdmin.from('call_logs').select('recording_url').eq('id', id).single()
-  if (error || !log?.recording_url) return NextResponse.json({ error: 'Recording not found' }, { status: 404 })
+  const { data: log, error: dbError } = await supabaseAdmin
+    .from('call_logs')
+    .select('recording_url')
+    .eq('id', id)
+    .single()
+
+  if (dbError || !log?.recording_url) {
+    console.error('[Stream] Recording not found for log id:', id, 'dbError:', dbError?.message)
+    return NextResponse.json({ error: 'Recording not found' }, { status: 404 })
+  }
+
+  console.log('[Stream] Fetching recording URL:', log.recording_url)
 
   const range = request.headers.get('range')
-  const headers: Record<string, string> = {}
-  if (range) headers.Range = range
+  const upstreamHeaders: Record<string, string> = {}
+  if (range) upstreamHeaders.Range = range
+
   const credentials = `${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`
   const upstream = await fetch(log.recording_url, {
-    headers: { ...headers, Authorization: `Basic ${Buffer.from(credentials).toString('base64')}` },
+    headers: {
+      ...upstreamHeaders,
+      Authorization: `Basic ${Buffer.from(credentials).toString('base64')}`,
+    },
   })
-  if (!upstream.ok && upstream.status !== 206) return new NextResponse('Unable to fetch recording', { status: upstream.status })
+
+  console.log('[Stream] Twilio response status:', upstream.status, 'Content-Type:', upstream.headers.get('content-type'))
+
+  if (!upstream.ok && upstream.status !== 206) {
+    const body = await upstream.text()
+    console.error('[Stream] Twilio returned error:', upstream.status, body)
+    return new NextResponse(`Unable to fetch recording: ${upstream.status}`, { status: upstream.status })
+  }
 
   const responseHeaders = new Headers()
   for (const name of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified']) {
     const value = upstream.headers.get(name)
     if (value) responseHeaders.set(name, value)
   }
+  // Ensure content-type is set for audio (Twilio sometimes omits it)
+  if (!responseHeaders.has('content-type')) {
+    responseHeaders.set('content-type', 'audio/mpeg')
+  }
   responseHeaders.set('Cache-Control', 'private, max-age=3600')
+  responseHeaders.set('Accept-Ranges', 'bytes')
+
   return new NextResponse(upstream.body, { status: upstream.status, headers: responseHeaders })
 }
