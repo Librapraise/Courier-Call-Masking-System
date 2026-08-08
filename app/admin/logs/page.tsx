@@ -15,6 +15,7 @@ export default function CallLogsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [sessionToken, setSessionToken] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -28,6 +29,8 @@ export default function CallLogsPage() {
       router.push('/login')
       return
     }
+    // Store token so audio stream URLs can authenticate
+    setSessionToken(session.access_token)
 
     const { data: profile } = await supabase
       .from('profiles')
@@ -377,7 +380,7 @@ export default function CallLogsPage() {
                         <div className="flex items-center gap-2">
                           <audio
                             controls
-                            src={`/api/call/recording/stream/${log.id}`}
+                            src={sessionToken ? `/api/call/recording/stream/${log.id}?token=${sessionToken}` : undefined}
                             preload="none"
                             className="h-8 max-w-[200px] sm:max-w-[240px]"
                           />

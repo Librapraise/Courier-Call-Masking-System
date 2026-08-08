@@ -7,13 +7,21 @@ export const runtime = 'nodejs'
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
-  // Auth: check bearer token first, then cookies
+  // Auth: check bearer token in header first, then ?token= query param, then cookies
   let user = null
   const authHeader = request.headers.get('Authorization')
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7)
     const { data } = await supabaseAdmin.auth.getUser(token)
     user = data.user
+  }
+  if (!user) {
+    // Allow token via query param for browser <audio> elements which cannot set headers
+    const queryToken = request.nextUrl.searchParams.get('token')
+    if (queryToken) {
+      const { data } = await supabaseAdmin.auth.getUser(queryToken)
+      user = data.user
+    }
   }
   if (!user) {
     const supabase = createServerClient(
