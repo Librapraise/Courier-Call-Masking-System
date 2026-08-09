@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
     // Fetch customer details (phone number, name)
     const { data: customer, error: customerError } = await supabaseAdmin
       .from('customers')
-      .select('id, name, phone_number, is_active, is_completed')
+      .select('id, name, phone_number, is_active, is_completed, assigned_courier_id')
       .eq('id', customerId)
       .single()
 
@@ -99,6 +99,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Customer not found' },
         { status: 404 }
+      )
+    }
+
+    if (customer.assigned_courier_id && customer.assigned_courier_id !== user.id) {
+      console.error('[API] /api/delivery/complete - Customer assigned to another courier:', { customerAssigned: customer.assigned_courier_id, courierUser: user.id })
+      return NextResponse.json(
+        { error: 'Customer is assigned to another courier' },
+        { status: 403 }
       )
     }
 

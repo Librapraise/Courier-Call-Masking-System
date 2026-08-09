@@ -16,11 +16,10 @@ export default function CourierPage() {
   const router = useRouter()
 
   useEffect(() => {
-    checkAuth()
-    fetchCustomers()
+    initCourierPage()
   }, [])
 
-  const checkAuth = async () => {
+  const initCourierPage = async () => {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) {
       router.push('/login')
@@ -36,15 +35,26 @@ export default function CourierPage() {
 
     if (profile?.role !== 'courier') {
       router.push('/admin')
+      return
     }
+
+    await fetchCustomers(session.user.id)
   }
 
-  const fetchCustomers = async () => {
+  const fetchCustomers = async (userId?: string) => {
     try {
+      let courierId = userId
+      if (!courierId) {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) return
+        courierId = session.user.id
+      }
+
       const { data, error } = await supabase
         .from('customers')
-        .select('id, name, is_active, is_completed, created_at')
+        .select('id, name, is_active, is_completed, created_at, assigned_courier_id')
         .eq('is_active', true)
+        .or(`assigned_courier_id.eq.${courierId},assigned_courier_id.is.null`)
         .order('name', { ascending: true })
 
       if (error) throw error
