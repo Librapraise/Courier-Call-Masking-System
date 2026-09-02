@@ -17,9 +17,17 @@ export async function POST(request: NextRequest) {
 
       // Only process incoming customer messages (message_type === 'incoming' or 0)
       if ((messageType === 'incoming' || messageType === 0) && content) {
-        const rawPhone = sender?.phone_number || conversation?.meta?.sender?.phone_number || ''
+        let rawPhone = sender?.phone_number || 
+                       conversation?.meta?.sender?.phone_number || 
+                       payload.contact?.phone_number || 
+                       ''
+
+        if (!rawPhone && conversation?.contact_inbox?.source_id) {
+          rawPhone = conversation.contact_inbox.source_id
+        }
+
         const cleanPhone = rawPhone.replace('whatsapp:', '').trim()
-        const senderName = sender?.name || payload.account?.name || null
+        const senderName = sender?.name || conversation?.meta?.sender?.name || null
 
         console.log(`[API] /api/chatwoot-webhook - Received incoming message from Chatwoot for phone: ${cleanPhone}`)
 
@@ -34,6 +42,18 @@ export async function POST(request: NextRequest) {
 
           if (customerMatch) {
             customerId = customerMatch.id
+          } else {
+            const lastDigits = cleanPhone.slice(-9)
+            if (lastDigits.length >= 7) {
+              const { data: fuzzyMatch } = await supabaseAdmin
+                .from('customers')
+                .select('id')
+                .ilike('phone_number', `%${lastDigits}`)
+                .maybeSingle()
+              if (fuzzyMatch) {
+                customerId = fuzzyMatch.id
+              }
+            }
           }
 
           // Save reply into whatsapp_replies table
