@@ -39,6 +39,17 @@ export interface Feedback {
   courier_email?: string
 }
 
+export interface WhatsAppReply {
+  id: string
+  customer_id: string | null
+  phone_number: string
+  profile_name: string | null
+  message_body: string
+  message_sid: string | null
+  created_at: string
+  customer_name?: string
+}
+
 export interface CallLog {
   id: string
   customer_id: string | null
