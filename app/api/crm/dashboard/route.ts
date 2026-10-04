@@ -77,11 +77,58 @@ export async function GET() {
       .select('*')
       .order('category')
 
-    // 4. Fetch Couriers
-    const { data: couriersData } = await supabaseAdmin
+    // 4. Fetch Couriers (with auto-sync from profiles roster)
+    let { data: couriersData } = await supabaseAdmin
       .from('crm_couriers')
       .select('*')
       .order('name')
+
+    // Safeguard: Ensure any courier account in profiles is automatically synced into crm_couriers roster
+    try {
+      const { data: courierProfiles } = await supabaseAdmin
+        .from('profiles')
+        .select('id, email, phone_number')
+        .eq('role', 'courier')
+
+      if (courierProfiles && courierProfiles.length > 0) {
+        const existingPhones = new Set(
+          (couriersData || []).map(c => (c.phone_number || '').replace(/\D/g, '').slice(-9))
+        )
+        const missing = courierProfiles.filter(p => {
+          const cleanP = (p.phone_number || '').replace(/\D/g, '').slice(-9)
+          return cleanP && !existingPhones.has(cleanP)
+        })
+
+        if (missing.length > 0) {
+          const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers()
+          const authMap = new Map((authUsers?.users || []).map(u => [u.id, u]))
+
+          for (const m of missing) {
+            const u = authMap.get(m.id)
+            const meta = u ? u.user_metadata : {}
+            const name = meta.name || meta.full_name || (m.email ? m.email.split('@')[0] : 'Courier')
+            const telegramId = meta.telegram_id ? Number(meta.telegram_id) : null
+
+            await supabaseAdmin.from('crm_couriers').insert({
+              name,
+              phone_number: m.phone_number,
+              telegram_id: telegramId,
+              is_active: true
+            })
+          }
+
+          const { data: refreshedCouriers } = await supabaseAdmin
+            .from('crm_couriers')
+            .select('*')
+            .order('name')
+          if (refreshedCouriers) {
+            couriersData = refreshedCouriers
+          }
+        }
+      }
+    } catch (syncErr) {
+      console.warn('[CRM Dashboard API] Courier auto-sync warning:', syncErr)
+    }
 
     // 5. Calculate Top Metrics
     const today = new Date()
