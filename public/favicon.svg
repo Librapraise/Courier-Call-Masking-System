@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="50%" stop-color="#0B0F19" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+
+    <!-- Royal Electric Indigo to Violet -->
+    <linearGradient id="brandIndigo" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5" />
+      <stop offset="50%" stop-color="#6366F1" />
+      <stop offset="100%" stop-color="#8B5CF6" />
+    </linearGradient>
+
+    <!-- Cyan Neon Accent -->
+    <linearGradient id="neonCyan" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06B6D4" />
+      <stop offset="50%" stop-color="#22D3EE" />
+      <stop offset="100%" stop-color="#38BDF8" />
+    </linearGradient>
+
+    <!-- Outer Glow Filter -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <linearGradient id="rimGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366F1" stop-opacity="0.8" />
+      <stop offset="50%" stop-color="#06B6D4" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0.7" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background Base Container (Squircle) -->
+  <rect x="28" y="28" width="456" height="456" rx="124" fill="url(#bgGrad)" stroke="url(#rimGlow)" stroke-width="8" />
+
+  <!-- Inner Ambient Radial Glow -->
+  <circle cx="256" cy="240" r="160" fill="#4F46E5" opacity="0.22" filter="url(#glow)" />
+  <circle cx="256" cy="240" r="90" fill="#06B6D4" opacity="0.18" filter="url(#glow)" />
+
+  <!-- Masking Signal Wave Arcs (Call Masking / Radar / Telegram Signals) -->
+  <path d="M 172 152 A 114 114 0 0 1 340 152" fill="none" stroke="url(#neonCyan)" stroke-width="14" stroke-linecap="round" opacity="0.45" />
+  <path d="M 204 184 A 72 72 0 0 1 308 184" fill="none" stroke="url(#neonCyan)" stroke-width="12" stroke-linecap="round" opacity="0.9" />
+
+  <!-- Ghost Shield Emblem (Main Body) -->
+  <path d="M 256 194
+           C 314 194 356 232 356 290
+           C 356 344 316 388 256 424
+           C 196 388 156 344 156 290
+           C 156 232 198 194 256 194 Z"
+        fill="url(#brandIndigo)" />
+
+  <!-- 3D Shadow Split for Depth -->
+  <path d="M 256 194
+           C 314 194 356 232 356 290
+           C 356 344 316 388 256 424
+           L 256 194 Z"
+        fill="#000000"
+        opacity="0.2" />
+
+  <!-- Glowing Visor / Ghost Eyes (Masked Identity) -->
+  <!-- Left Eye/Slit -->
+  <path d="M 202 284 L 236 298 C 238 299 236 304 232 304 L 200 294 C 196 292 197 285 202 284 Z"
+        fill="#FFFFFF"
+        filter="url(#glow)" />
+  <path d="M 202 284 L 236 298 C 238 299 236 304 232 304 L 200 294 C 196 292 197 285 202 284 Z"
+        fill="url(#neonCyan)" />
+
+  <!-- Right Eye/Slit -->
+  <path d="M 310 284 L 276 298 C 274 299 276 304 280 304 L 312 294 C 316 292 315 285 310 284 Z"
+        fill="#FFFFFF"
+        filter="url(#glow)" />
+  <path d="M 310 284 L 276 298 C 274 299 276 304 280 304 L 312 294 C 316 292 315 285 310 284 Z"
+        fill="url(#neonCyan)" />
+
+  <!-- Central Secure Pulse Beacon -->
+  <circle cx="256" cy="346" r="10" fill="#FFFFFF" />
+  <circle cx="256" cy="346" r="16" fill="url(#neonCyan)" opacity="0.8" />
+</svg>

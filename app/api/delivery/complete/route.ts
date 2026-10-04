@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
     // Get courier profile and verify role
     const { data: courierProfile, error: courierError } = await supabaseAdmin
       .from('profiles')
-      .select('id, role')
+      .select('id, role, phone_number')
       .eq('id', user.id)
       .single()
 
@@ -87,10 +87,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Fetch customer details (phone number, name)
+    // Fetch customer details (phone number, name, assignment)
     const { data: customer, error: customerError } = await supabaseAdmin
       .from('customers')
-      .select('id, name, phone_number, is_active, is_completed')
+      .select('id, name, phone_number, is_active, is_completed, assigned_courier_id')
       .eq('id', customerId)
       .single()
 
@@ -100,6 +100,46 @@ export async function POST(request: NextRequest) {
         { error: 'Customer not found' },
         { status: 404 }
       )
+    }
+
+    // Security check: Couriers can only complete deliveries assigned to them
+    if (courierProfile.role === 'courier' && customer.assigned_courier_id !== courierProfile.id) {
+      let isCrmAssigned = false
+      try {
+        const cleanUserPhone = (courierProfile.phone_number || '').replace(/\D/g, '')
+        const cleanCustPhone = (customer.phone_number || '').replace(/\D/g, '')
+        const { data: crmCouriers } = await supabaseAdmin.from('crm_couriers').select('id, phone_number')
+        const matchedCrm = (crmCouriers || []).find(c => {
+          const cClean = (c.phone_number || '').replace(/\D/g, '')
+          return cleanUserPhone && cClean && (cleanUserPhone.endsWith(cClean.slice(-9)) || cClean.endsWith(cleanUserPhone.slice(-9)))
+        })
+        if (matchedCrm) {
+          const { data: crmOrders } = await supabaseAdmin
+            .from('crm_orders')
+            .select('id, crm_customers(phone_number)')
+            .eq('courier_id', matchedCrm.id)
+            .eq('is_settled', false)
+
+          isCrmAssigned = (crmOrders || []).some((o: any) => {
+            const oPhone = (o.crm_customers?.phone_number || '').replace(/\D/g, '')
+            return cleanCustPhone && oPhone && (cleanCustPhone.endsWith(oPhone.slice(-9)) || oPhone.endsWith(cleanCustPhone.slice(-9)))
+          })
+        }
+      } catch (checkErr) {
+        console.warn('CRM assignment fallback check note:', checkErr)
+      }
+
+      if (!isCrmAssigned) {
+        console.warn('[API] /api/delivery/complete - Unauthorized delivery completion attempt: Courier not assigned', {
+          courierId: courierProfile.id,
+          customerId: customer.id,
+          assignedCourierId: customer.assigned_courier_id
+        })
+        return NextResponse.json(
+          { error: 'Forbidden: You are not assigned to this customer' },
+          { status: 403 }
+        )
+      }
     }
 
     if (!customer.is_active) {

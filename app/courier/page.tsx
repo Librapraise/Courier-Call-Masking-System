@@ -13,44 +13,63 @@ export default function CourierPage() {
   const [calling, setCalling] = useState<string | null>(null)
   const [completing, setCompleting] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [courierEmail, setCourierEmail] = useState<string>('')
   const router = useRouter()
 
   useEffect(() => {
-    checkAuth()
-    fetchCustomers()
+    loadCourierDeliveries()
   }, [])
 
-  const checkAuth = async () => {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      router.push('/login')
-      return
-    }
-
-    // Verify user is a courier
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', session.user.id)
-      .single()
-
-    if (profile?.role !== 'courier') {
-      router.push('/admin')
-    }
-  }
-
-  const fetchCustomers = async () => {
+  const loadCourierDeliveries = async () => {
     try {
-      const { data, error } = await supabase
-        .from('customers')
-        .select('id, name, is_active, is_completed, created_at')
-        .eq('is_active', true)
-        .order('name', { ascending: true })
+      setLoading(true)
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        router.push('/login?redirectTo=/courier')
+        return
+      }
 
-      if (error) throw error
-      setCustomers(data || [])
+      setCourierEmail(session.user.email || '')
+
+      // Verify user role
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .maybeSingle()
+
+      if (profile && profile.role !== 'courier') {
+        // If an admin lands on /courier, redirect to /crm or /admin
+        router.push('/crm')
+        return
+      }
+
+      // Security: Fetch ONLY customers assigned to this courier via dedicated API
+      const response = await fetch('/api/courier/customers', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        cache: 'no-store',
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        setCustomers(result.customers || [])
+      } else {
+        // Fallback: direct Supabase query strictly scoped to session.user.id
+        const { data, error } = await supabase
+          .from('customers')
+          .select('id, name, is_active, is_completed, created_at')
+          .eq('is_active', true)
+          .eq('assigned_courier_id', session.user.id)
+          .order('name', { ascending: true })
+
+        if (error) throw error
+        setCustomers(data || [])
+      }
     } catch (err: any) {
-      console.error('Error fetching customers:', err)
+      console.error('Error fetching assigned courier deliveries:', err)
+      setMessage({ type: 'error', text: 'Error loading assigned deliveries' })
     } finally {
       setLoading(false)
     }
@@ -166,11 +185,19 @@ export default function CourierPage() {
       />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:py-8 sm:px-6 lg:px-8">
-        <div className="mb-6">
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Active Customers</h2>
-          <p className="mt-1 text-xs sm:text-sm text-gray-600">
-            Click "Call" to initiate a masked call or "Completed" when delivery is done
-          </p>
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Assigned Deliveries</h2>
+            <p className="mt-1 text-xs sm:text-sm text-gray-600">
+              Only customers assigned specifically to your queue are visible here. Click "Call" to initiate a masked call.
+            </p>
+          </div>
+          {courierEmail && (
+            <div className="text-xs text-slate-500 bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-xs inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Courier: <strong className="text-slate-800">{courierEmail}</strong></span>
+            </div>
+          )}
         </div>
 
         {message && (
@@ -184,8 +211,16 @@ export default function CourierPage() {
         )}
 
         {customers.length === 0 ? (
-          <div className="rounded-lg bg-white p-8 text-center shadow">
-            <p className="text-gray-600">No active customers found.</p>
+          <div className="rounded-xl border border-slate-200 bg-white p-12 text-center shadow-xs space-y-3">
+            <div className="mx-auto w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+            </div>
+            <h3 className="text-base font-bold text-slate-900">No Deliveries Assigned Yet</h3>
+            <p className="text-sm text-slate-500 max-w-md mx-auto">
+              Your queue is currently clear. Once your Persian Team dispatcher assigns delivery orders to your account, they will automatically appear here with one-tap masked calling.
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto rounded-lg bg-white shadow">

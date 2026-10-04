@@ -53,9 +53,10 @@ export async function POST(request: NextRequest) {
       authError = result.error
     }
 
-    // For cron jobs, allow if there's a secret token
+    // For cron jobs, allow if there's a valid secret token
     const cronSecret = request.headers.get('X-Cron-Secret')
-    const isCronJob = cronSecret === process.env.CRON_SECRET
+    const configuredCronSecret = process.env.CRON_SECRET?.trim()
+    const isCronJob = Boolean(configuredCronSecret) && cronSecret === configuredCronSecret
 
     console.log('[API] /api/admin/reset - Request type:', isCronJob ? 'Cron job' : 'Manual request')
 

@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
+import { EyeIcon, EyeOffIcon } from '@/components/crm/CrmIcons'
+import { GhostCrmLogoIcon } from '@/components/crm/GhostCrmLogo'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -11,16 +13,20 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [infoMessage, setInfoMessage] = useState<string | null>(null)
+  const [isForgotPasswordMode, setIsForgotPasswordMode] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
   const router = useRouter()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
+    setInfoMessage(null)
 
     try {
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password,
       })
 
@@ -32,10 +38,13 @@ export default function LoginPage() {
           .from('profiles')
           .select('role')
           .eq('id', data.user.id)
-          .single()
+          .maybeSingle()
+
+        const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+        const redirectTo = params?.get('redirectTo')
 
         if (profile?.role === 'admin') {
-          router.push('/admin')
+          router.push(redirectTo && redirectTo.startsWith('/') ? redirectTo : '/crm')
         } else {
           router.push('/courier')
         }
@@ -48,27 +57,141 @@ export default function LoginPage() {
     }
   }
 
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!email || !email.trim()) {
+      setError('Please enter your email address.')
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+    setInfoMessage(null)
+
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      })
+
+      const result = await res.json()
+
+      if (!res.ok) {
+        throw new Error(result.error || 'Failed to dispatch password reset link.')
+      }
+
+      setResetSent(true)
+      setInfoMessage(`A password reset link has been dispatched to ${email.trim()}. Please check your inbox and spam folder.`)
+    } catch (err: any) {
+      setError(err.message || 'Failed to send password reset link.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-8">
-      <div className="w-full max-w-md space-y-8 rounded-lg bg-white p-6 sm:p-8 shadow-md">
+    <div className="min-h-screen bg-white flex flex-col justify-center items-center px-4 py-12 selection:bg-[#5D6BB2]/20 font-sans">
+      <div className="w-full max-w-[480px] space-y-6">
+        {/* Header Block */}
         <div>
-          <h2 className="text-center text-2xl sm:text-3xl font-bold text-gray-900">
-            Courier Call Masking System
-          </h2>
-          <p className="mt-2 text-center text-xs sm:text-sm text-gray-600">
-            Sign in to your account
+          <div className="mb-5">
+            <GhostCrmLogoIcon className="w-12 h-12 drop-shadow-md" />
+          </div>
+          <h1 className="text-[32px] sm:text-[36px] font-bold text-[#1E2238] tracking-tight leading-tight">
+            {isForgotPasswordMode ? 'Reset your password' : 'Sign in to your account'}
+          </h1>
+          <p className="mt-2.5 text-sm sm:text-[15px] text-[#64748B] leading-relaxed">
+            {isForgotPasswordMode ? (
+              <>
+                Enter your account email to receive a password reset link. Remembered your password?{' '}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsForgotPasswordMode(false)
+                    setError(null)
+                    setInfoMessage(null)
+                  }}
+                  className="font-semibold text-[#5D6BB2] hover:text-[#4A559E] transition cursor-pointer"
+                >
+                  Back to Login
+                </button>
+              </>
+            ) : (
+              <>
+                Log in to Persian Team Management to access dispatches and operations. Don’t have an account yet?{' '}
+                <Link
+                  href="/register"
+                  className="font-semibold text-[#5D6BB2] hover:text-[#4A559E] transition cursor-pointer"
+                >
+                  Sign Up
+                </Link>
+              </>
+            )}
           </p>
         </div>
-        <form className="mt-8 space-y-6" onSubmit={handleLogin}>
-          {error && (
-            <div className="rounded-md bg-red-50 p-4">
-              <p className="text-sm text-red-800">{error}</p>
+
+        {/* Notifications */}
+        {error && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-xs text-rose-800">
+            {error}
+          </div>
+        )}
+        {infoMessage && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-xs text-emerald-800">
+            {infoMessage}
+          </div>
+        )}
+
+        {/* FORGOT PASSWORD FORM */}
+        {isForgotPasswordMode ? (
+          <form className="space-y-5" onSubmit={handleForgotPasswordSubmit}>
+            <div className="space-y-2">
+              <label htmlFor="reset-email" className="block text-sm font-medium text-[#1E293B]">
+                Registered Email Address
+              </label>
+              <input
+                id="reset-email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="user@example.com"
+                className="w-full rounded-xl border border-[#CBD5E1] bg-white px-4 py-3 text-sm text-[#0F172A] placeholder:text-[#94A3B8] transition duration-150 focus:border-[#5D6BB2] focus:outline-none focus:ring-4 focus:ring-[#5D6BB2]/10"
+              />
             </div>
-          )}
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                Email address
+
+            <div className="pt-2 flex items-center justify-between">
+              <button
+                type="submit"
+                disabled={loading || resetSent}
+                className="inline-flex items-center justify-center px-9 py-3 rounded-lg bg-[#5D6BB2] hover:bg-[#4E5CA1] text-white text-sm font-semibold shadow-xs transition duration-150 cursor-pointer disabled:opacity-50"
+              >
+                {loading ? 'Sending link...' : resetSent ? 'Link Dispatched' : 'Send Reset Link'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsForgotPasswordMode(false)
+                  setError(null)
+                  setInfoMessage(null)
+                }}
+                className="text-sm font-semibold text-[#64748B] hover:text-[#1E2238] transition cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          /* STANDARD LOGIN FORM */
+          <form className="space-y-5" onSubmit={handleLogin}>
+            {/* Email */}
+            <div className="space-y-2">
+              <label htmlFor="email" className="block text-sm font-medium text-[#1E293B]">
+                Email
               </label>
               <input
                 id="email"
@@ -78,15 +201,17 @@ export default function LoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 block w-full rounded-md text-black border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
-                placeholder="Enter your email"
+                placeholder="user@example.com"
+                className="w-full rounded-xl border border-[#CBD5E1] bg-white px-4 py-3 text-sm text-[#0F172A] placeholder:text-[#94A3B8] transition duration-150 focus:border-[#5D6BB2] focus:outline-none focus:ring-4 focus:ring-[#5D6BB2]/10"
               />
             </div>
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+
+            {/* Password */}
+            <div className="space-y-2">
+              <label htmlFor="password" className="block text-sm font-medium text-[#1E293B]">
                 Password
               </label>
-              <div className="relative mt-1">
+              <div className="relative">
                 <input
                   id="password"
                   name="password"
@@ -95,78 +220,53 @@ export default function LoginPage() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full rounded-md text-black border border-gray-300 px-3 py-2 pr-10 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
-                  placeholder="Enter your password"
+                  placeholder="Enter Password"
+                  className="w-full rounded-xl border border-[#CBD5E1] bg-white px-4 py-3 pr-11 text-sm text-[#0F172A] placeholder:text-[#94A3B8] transition duration-150 focus:border-[#5D6BB2] focus:outline-none focus:ring-4 focus:ring-[#5D6BB2]/10"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
-                  tabIndex={-1}
+                  className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-[#94A3B8] hover:text-[#64748B] transition cursor-pointer"
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? (
-                    <svg
-                      className="h-5 w-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
-                      />
-                    </svg>
+                    <EyeIcon className="w-5 h-5" />
                   ) : (
-                    <svg
-                      className="h-5 w-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                      />
-                    </svg>
+                    <EyeOffIcon className="w-5 h-5" />
                   )}
                 </button>
               </div>
             </div>
-          </div>
 
-          <div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-gray-400"
-            >
-              {loading ? 'Signing in...' : 'Sign in'}
-            </button>
-          </div>
+            {/* Forgot Password Link */}
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsForgotPasswordMode(true)
+                  setError(null)
+                  setInfoMessage(null)
+                }}
+                className="text-sm font-semibold text-[#5D6BB2] hover:text-[#4A559E] transition cursor-pointer"
+              >
+                Forgot Password?
+              </button>
+            </div>
 
-          <div className="text-center">
-            <p className="text-sm text-gray-600">
-              Don't have an account?{' '}
-              <Link href="/register" className="font-medium text-blue-600 hover:text-blue-500">
-                Sign up
-              </Link>
-            </p>
-          </div>
-        </form>
+            {/* Action Button */}
+            <div className="pt-1">
+              <button
+                type="submit"
+                disabled={loading}
+                className="inline-flex items-center justify-center px-9 py-3 rounded-lg bg-[#5D6BB2] hover:bg-[#4E5CA1] text-white text-sm font-semibold shadow-xs transition duration-150 cursor-pointer disabled:opacity-50"
+              >
+                {loading ? 'Logging in...' : 'Login'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   )
 }
-
