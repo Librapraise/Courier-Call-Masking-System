@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
+import { formatPhoneForStorage } from '@/lib/utils/phone'
 
 export async function GET(request: NextRequest) {
   try {
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // 1. Fetch customers assigned specifically to this courier ID
+    // 1. Fetch customers assigned specifically to this courier user ID in legacy table
     const { data: assignedCustomers, error: queryErr } = await supabaseAdmin
       .from('customers')
       .select('id, name, is_active, is_completed, created_at, assigned_courier_id')
@@ -91,7 +92,7 @@ export async function GET(request: NextRequest) {
 
     let customerList = assignedCustomers || []
 
-    // 2. Also check if courier is mapped to a crm_couriers roster record (by phone or telegram)
+    // 2. Also match active crm_orders assigned to this courier in the CRM roster
     try {
       const cleanUserPhone = (profile.phone_number || '').replace(/\D/g, '')
       const telegramId = user.user_metadata?.telegram_id
@@ -111,31 +112,99 @@ export async function GET(request: NextRequest) {
         // Fetch active crm_orders for this courier
         const { data: activeOrders } = await supabaseAdmin
           .from('crm_orders')
-          .select('id, address, crm_customers(phone_number)')
+          .select(`
+            id,
+            address,
+            city,
+            is_settled,
+            created_at,
+            crm_customers (
+              id,
+              address_name,
+              phone_number
+            )
+          `)
           .eq('courier_id', matchedCrmCourier.id)
           .eq('is_settled', false)
+          .order('created_at', { ascending: false })
 
         if (activeOrders && activeOrders.length > 0) {
-          const orderPhones = activeOrders.map((o: any) => (o.crm_customers?.phone_number || '').replace(/\D/g, '')).filter(Boolean)
-          
-          const { data: allActiveCusts } = await supabaseAdmin
+          const { data: allCusts } = await supabaseAdmin
             .from('customers')
             .select('id, name, phone_number, is_active, is_completed, created_at, assigned_courier_id')
-            .eq('is_active', true)
 
-          const matchedByOrder = (allActiveCusts || []).filter(c => {
-            const cClean = (c.phone_number || '').replace(/\D/g, '')
-            return orderPhones.some(p => cClean.endsWith(p.slice(-9)) || p.endsWith(cClean.slice(-9)))
-          })
+          for (const order of activeOrders) {
+            const cust = (order as any).crm_customers
+            const orderPhone = cust?.phone_number
+            const orderAddress = order.address || cust?.address_name || 'Delivery Address'
+            if (!orderPhone) continue
 
-          customerList = Array.from(
-            new Map([...customerList, ...matchedByOrder].map(c => [c.id, c])).values()
-          )
+            const cleanOrderPhone = orderPhone.replace(/\D/g, '')
+            let matchedCust = (allCusts || []).find(c => {
+              const cClean = (c.phone_number || '').replace(/\D/g, '')
+              return cleanOrderPhone && cClean && (cleanOrderPhone.endsWith(cClean.slice(-9)) || cClean.endsWith(cleanOrderPhone.slice(-9)))
+            })
+
+            if (matchedCust) {
+              // Ensure assigned to this courier & active
+              if (matchedCust.assigned_courier_id !== user.id || !matchedCust.is_active || matchedCust.name !== orderAddress) {
+                await supabaseAdmin
+                  .from('customers')
+                  .update({
+                    assigned_courier_id: user.id,
+                    name: orderAddress,
+                    is_active: true
+                  })
+                  .eq('id', matchedCust.id)
+                matchedCust.assigned_courier_id = user.id
+                matchedCust.name = orderAddress
+                matchedCust.is_active = true
+              }
+
+              // Add to customer list if not already present
+              if (!customerList.some(c => c.id === matchedCust!.id)) {
+                customerList.push({
+                  id: matchedCust.id,
+                  name: matchedCust.name,
+                  is_active: matchedCust.is_active,
+                  is_completed: matchedCust.is_completed,
+                  created_at: matchedCust.created_at,
+                  assigned_courier_id: matchedCust.assigned_courier_id || user.id
+                })
+              }
+            } else {
+              // Auto-provision into customers table for Twilio call-masking
+              const { data: newCust, error: insErr } = await supabaseAdmin
+                .from('customers')
+                .insert({
+                  name: orderAddress,
+                  phone_number: formatPhoneForStorage(orderPhone),
+                  is_active: true,
+                  is_completed: false,
+                  assigned_courier_id: user.id
+                })
+                .select('id, name, is_active, is_completed, created_at, assigned_courier_id')
+                .single()
+
+              if (!insErr && newCust) {
+                customerList.push(newCust)
+              } else if (insErr) {
+                console.error('[CourierAPI] Failed to auto-provision customer record:', insErr)
+              }
+            }
+          }
         }
       }
     } catch (crmErr) {
       console.warn('[CourierAPI] Note on CRM order matching:', crmErr)
     }
+
+    // Deduplicate customerList by id
+    const uniqueMap = new Map()
+    for (const c of customerList) {
+      uniqueMap.set(c.id, c)
+    }
+    customerList = Array.from(uniqueMap.values())
 
     // Return the customer list (Notice: phone_number is never exposed to client)
     return NextResponse.json({

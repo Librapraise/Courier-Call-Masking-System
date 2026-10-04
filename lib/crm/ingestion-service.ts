@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../supabase/server'
 import { ParsedDeliveryOrder } from './parser'
+import { formatPhoneForStorage } from '../utils/phone'
 
 export interface IngestionResult {
   success: boolean
@@ -110,18 +111,39 @@ export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise
 
     // Also sync to legacy customers table for the Twilio Call-Masking Courier App
     try {
-      await supabaseAdmin
+      const normalizedPhone = formatPhoneForStorage(parsed.phoneNumber)
+      const cleanPhone = (parsed.phoneNumber || '').replace(/\D/g, '')
+
+      const { data: legacyCusts } = await supabaseAdmin
         .from('customers')
-        .upsert(
-          {
+        .select('id, phone_number')
+
+      const matchedLegacy = (legacyCusts || []).find(c => {
+        const cClean = (c.phone_number || '').replace(/\D/g, '')
+        return cClean && cleanPhone && (cClean.endsWith(cleanPhone.slice(-9)) || cleanPhone.endsWith(cClean.slice(-9)))
+      })
+
+      if (matchedLegacy) {
+        await supabaseAdmin
+          .from('customers')
+          .update({
             name: parsed.customerName,
-            phone_number: parsed.phoneNumber,
-            is_active: true
-          },
-          { onConflict: 'phone_number' }
-        )
+            phone_number: normalizedPhone,
+            is_active: true,
+            is_completed: false
+          })
+          .eq('id', matchedLegacy.id)
+      } else {
+        await supabaseAdmin
+          .from('customers')
+          .insert({
+            name: parsed.customerName,
+            phone_number: normalizedPhone,
+            is_active: true,
+            is_completed: false
+          })
+      }
     } catch (syncErr) {
-      // Non-fatal if legacy table constraint differs
       console.warn('[Ingest] Legacy customer sync note:', syncErr)
     }
 

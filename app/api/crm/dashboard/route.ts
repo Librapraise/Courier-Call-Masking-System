@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin, createClient } from '@/lib/supabase/server'
 import { BRANDS_LIST } from '@/lib/crm/catalog-data'
 import { sendTelegramMessage } from '@/lib/crm/telegram-bot'
+import { formatPhoneForStorage } from '@/lib/utils/phone'
 
 export async function GET() {
   try {
@@ -302,28 +303,43 @@ export async function POST(req: Request) {
           return cClean && (cClean.endsWith(cleanCustPhone.slice(-9)) || cleanCustPhone.endsWith(cClean.slice(-9)))
         })
 
+        let targetProfileId: string | null = null
+
+        if (assignedCourier) {
+          const cleanCourierPhone = (assignedCourier.phone_number || '').replace(/\D/g, '')
+          const { data: profiles } = await supabaseAdmin
+            .from('profiles')
+            .select('id, phone_number, role')
+            .eq('role', 'courier')
+
+          const matchedProfile = (profiles || []).find(p => {
+            const pClean = (p.phone_number || '').replace(/\D/g, '')
+            return pClean && cleanCourierPhone && (pClean.endsWith(cleanCourierPhone.slice(-9)) || cleanCourierPhone.endsWith(pClean.slice(-9)))
+          })
+
+          targetProfileId = matchedProfile ? matchedProfile.id : (profiles?.[0]?.id || null)
+        }
+
         if (matchedCust) {
-          let targetProfileId: string | null = null
-
-          if (assignedCourier) {
-            const cleanCourierPhone = (assignedCourier.phone_number || '').replace(/\D/g, '')
-            const { data: profiles } = await supabaseAdmin
-              .from('profiles')
-              .select('id, phone_number, role')
-              .eq('role', 'courier')
-
-            const matchedProfile = (profiles || []).find(p => {
-              const pClean = (p.phone_number || '').replace(/\D/g, '')
-              return pClean && cleanCourierPhone && (pClean.endsWith(cleanCourierPhone.slice(-9)) || cleanCourierPhone.endsWith(pClean.slice(-9)))
-            })
-
-            targetProfileId = matchedProfile ? matchedProfile.id : (profiles?.[0]?.id || null)
-          }
-
           await supabaseAdmin
             .from('customers')
-            .update({ assigned_courier_id: targetProfileId })
+            .update({ 
+              assigned_courier_id: targetProfileId,
+              name: updatedOrder.address,
+              is_active: true,
+              is_completed: false
+            })
             .eq('id', matchedCust.id)
+        } else {
+          await supabaseAdmin
+            .from('customers')
+            .insert({
+              name: updatedOrder.address,
+              phone_number: formatPhoneForStorage(custPhone),
+              is_active: true,
+              is_completed: false,
+              assigned_courier_id: targetProfileId
+            })
         }
       }
 
