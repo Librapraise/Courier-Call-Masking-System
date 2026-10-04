@@ -352,10 +352,7 @@ export async function POST(req: Request) {
 ━━━━━━━━━━━━━━━━━━━━━
 📍 *כתובת:* ${updatedOrder.address}
 🏙️ *עיר:* ${updatedOrder.city || 'מרכז'}
-💵 *סכום לגבייה:* ₪${Number(updatedOrder.total_price || 0).toLocaleString()} מזומן
-📦 *פריטים להפצה:* ${updatedOrder.actual_items || updatedOrder.menu_items || 'משלוח חבילה'}
-
-🔗 [פתח חיוג מאובטח באפליקציית השליחים](https://www.couriercall.site/courier)`
+💵 *סכום לגבייה:* ₪${Number(updatedOrder.total_price || 0).toLocaleString()} מזומן`
 
             await sendTelegramMessage(botToken, {
               chat_id: assignedCourier.telegram_id,

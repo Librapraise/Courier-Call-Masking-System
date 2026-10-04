@@ -28,12 +28,16 @@ export async function GET() {
     const phoneNumber = profile?.phone_number || meta.phone_number || ''
     const telegramId = meta.telegram_id || ''
 
+    const isSuperAdmin = user.email === 'feelgee8@gmail.com' || meta.role === 'super_admin' || meta.is_super_admin === true
+    const roleTitle = isSuperAdmin ? 'Super Admin' : (profile?.role === 'admin' ? 'Dispatcher' : 'Courier')
+
     return NextResponse.json({
       ok: true,
       profile: {
         id: user.id,
         email: user.email,
-        role: profile?.role === 'admin' ? 'System Admin' : 'Courier',
+        role: roleTitle,
+        is_super_admin: isSuperAdmin,
         name: displayName,
         phone_number: phoneNumber,
         telegram_id: telegramId

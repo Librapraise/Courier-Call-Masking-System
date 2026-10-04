@@ -129,11 +129,6 @@ When a courier is assigned in the CRM, the Telegram bot automatically dispatches
 📍 כתובת: מרקו לויז - הנשיאים 57 פתח תקווה
 🏙️ עיר: פתח תקווה
 💵 סכום לגבייה: ₪3,000 מזומן
-📦 מוצרים: 2 גלאטו 33, 2 אלסקה, 2 בראון
-🍃 ניפוק מחסן: 20 גרם רפואי האני, 20 גרם רפואי מלון
-
-🔗 פתח חיוג מאובטח באפליקציית השליחים:
-https://www.couriercall.site/courier
 ```
 
 ---

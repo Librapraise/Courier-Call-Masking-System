@@ -20,7 +20,9 @@ import {
   SearchIcon,
   BoxIcon,
   UsersIcon,
-  PhoneIcon
+  PhoneIcon,
+  CopyIcon,
+  XIcon
 } from '@/components/crm/CrmIcons'
 import { Brand, Courier, Order } from '@/components/crm/CrmRouteViews'
 import { supabase } from '@/lib/supabase/client'
@@ -33,6 +35,7 @@ interface CrmSettingsViewProps {
     name: string
     phone_number?: string
     telegram_id?: string
+    is_super_admin?: boolean
   } | null
   orders: Order[]
   brands: Brand[]
@@ -95,65 +98,204 @@ export function CrmSettingsView({
   const [brandSearch, setBrandSearch] = useState('')
   const [brandActiveMap, setBrandActiveMap] = useState<Record<string, boolean>>({})
 
-  // Team Member Management State (Pre-seeded with current managers & couriers)
-  const [teamMembers, setTeamMembers] = useState([
-    {
-      id: 'admin-1',
-      name: userProfile?.name || 'feelgee8',
-      email: userProfile?.email || 'admin@persiancrm.internal',
-      role: 'System Admin',
-      telegram_id: userProfile?.telegram_id || '5338301589',
-      status: 'Active',
-      phone: userProfile?.phone_number || '050-1234567'
-    },
-    {
-      id: 'disp-1',
-      name: 'תומר מנהל משמרת',
-      email: 'tomer.dispatch@ghostcrm.internal',
-      role: 'Dispatcher',
-      telegram_id: '891048201',
-      status: 'Active',
-      phone: '052-9988771'
-    },
-    {
-      id: 'disp-2',
-      name: 'שרון תפעול לילה',
-      email: 'sharon.ops@ghostcrm.internal',
-      role: 'Dispatcher',
-      telegram_id: '650192841',
-      status: 'Active',
-      phone: '054-3322110'
-    },
-    ...couriers.slice(0, 4).map((c, i) => ({
-      id: `courier-${c.id || i}`,
-      name: c.name,
-      email: `courier.${i + 1}@ghostcrm.internal`,
-      role: 'Courier',
-      telegram_id: '50' + (1000000 + i * 23145),
-      status: 'On Shift',
-      phone: c.phone_number || '052-1112233'
-    }))
-  ])
+  // Live Team Member Management State
+  const [teamMembers, setTeamMembers] = useState<any[]>([])
+  const [isLoadingTeam, setIsLoadingTeam] = useState(false)
+  const [teamToast, setTeamToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [updatingRoleMemberId, setUpdatingRoleMemberId] = useState<string | null>(null)
+
+  // Invite Member Modal State
+  const [showInviteModal, setShowInviteModal] = useState(false)
+  const [inviteName, setInviteName] = useState('')
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [invitePhone, setInvitePhone] = useState('')
+  const [inviteTelegramId, setInviteTelegramId] = useState('')
+  const [inviteRole, setInviteRole] = useState<'super_admin' | 'admin' | 'courier'>('admin')
+  const [invitePassword, setInvitePassword] = useState('')
+  const [isSubmittingInvite, setIsSubmittingInvite] = useState(false)
+  const [inviteError, setInviteError] = useState<string | null>(null)
+  const [inviteSuccessCard, setInviteSuccessCard] = useState<{
+    name: string
+    email: string
+    role: string
+    password: string
+    loginUrl: string
+  } | null>(null)
+  const [inviteCardCopied, setInviteCardCopied] = useState(false)
+
+  // Delete Member Modal State
+  const [memberToDelete, setMemberToDelete] = useState<any | null>(null)
+  const [isDeletingMember, setIsDeletingMember] = useState(false)
+
+  const isCallerSuperAdmin =
+    userProfile?.email === 'feelgee8@gmail.com' ||
+    userProfile?.role === 'Super Admin' ||
+    !!userProfile?.is_super_admin
+
+  const fetchTeamMembers = async () => {
+    try {
+      setIsLoadingTeam(true)
+      const res = await fetch('/api/crm/team')
+      if (res.ok) {
+        const data = await res.json()
+        if (data.ok && Array.isArray(data.teamMembers)) {
+          setTeamMembers(data.teamMembers)
+        }
+      }
+    } catch (err) {
+      console.error('[GhostCRM] Error fetching team members:', err)
+    } finally {
+      setIsLoadingTeam(false)
+    }
+  }
+
+  // Load team whenever the team tab is opened
+  useEffect(() => {
+    if (activeTab === 'team') {
+      fetchTeamMembers()
+    }
+  }, [activeTab])
 
   // Sync profile when userProfile prop updates
   useEffect(() => {
     if (userProfile?.name) setFullName(userProfile.name)
     if (userProfile?.phone_number !== undefined) setPhoneNumber(userProfile.phone_number || '')
     if (userProfile?.telegram_id !== undefined) setTelegramId(userProfile.telegram_id || '')
-
-    setTeamMembers(prev =>
-      prev.map(m =>
-        m.id === 'admin-1'
-          ? {
-              ...m,
-              name: userProfile?.name || m.name,
-              phone: userProfile?.phone_number || m.phone,
-              telegram_id: userProfile?.telegram_id || m.telegram_id
-            }
-          : m
-      )
-    )
   }, [userProfile])
+
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    let rand = ''
+    for (let i = 0; i < 4; i++) {
+      rand += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    setInvitePassword(`Persian#${rand}`)
+  }
+
+  const handleInviteSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setInviteError(null)
+
+    if (!inviteName.trim() || !inviteEmail.trim() || !invitePassword.trim()) {
+      setInviteError(lang === 'he' ? 'נא למלא את כל שדות החובה' : 'Please fill in all required fields.')
+      return
+    }
+
+    try {
+      setIsSubmittingInvite(true)
+      const res = await fetch('/api/crm/team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'INVITE_MEMBER',
+          name: inviteName.trim(),
+          email: inviteEmail.trim(),
+          role: inviteRole,
+          phone_number: invitePhone.trim() || null,
+          telegram_id: inviteTelegramId.trim() || null,
+          password: invitePassword.trim()
+        })
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to provision team member.')
+      }
+
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://www.couriercall.site'
+      setInviteSuccessCard({
+        name: inviteName.trim(),
+        email: inviteEmail.trim(),
+        role: inviteRole === 'super_admin' ? 'Super Admin' : inviteRole === 'admin' ? 'Dispatcher (Admin)' : 'Courier Driver',
+        password: invitePassword.trim(),
+        loginUrl: `${origin}/login`
+      })
+
+      fetchTeamMembers()
+    } catch (err: any) {
+      setInviteError(err.message || 'Error creating member')
+    } finally {
+      setIsSubmittingInvite(false)
+    }
+  }
+
+  const handleCopyInviteCard = () => {
+    if (!inviteSuccessCard) return
+    const msg = `🛵 *ברוך הבא לצוות Persian Team!*
+━━━━━━━━━━━━━━━━━━━━━
+החשבון שלך נוצר בהצלחה למערכת:
+🔗 *קישור התחברות:* ${inviteSuccessCard.loginUrl}
+📧 *אימייל:* ${inviteSuccessCard.email}
+🔑 *סיסמה זמנית:* ${inviteSuccessCard.password}
+🛡️ *תפקיד במערכת:* ${inviteSuccessCard.role}
+━━━━━━━━━━━━━━━━━━━━━
+מומלץ לשמור הודעה זו ולהתחבר ישירות מהנייד.`
+
+    navigator.clipboard.writeText(msg)
+    setInviteCardCopied(true)
+    setTimeout(() => setInviteCardCopied(false), 2500)
+  }
+
+  const handleRoleChange = async (memberId: string, newRole: string) => {
+    try {
+      setUpdatingRoleMemberId(memberId)
+      const res = await fetch('/api/crm/team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'ASSIGN_ROLE',
+          memberId,
+          newRole
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to update role.')
+      }
+      setTeamToast({
+        type: 'success',
+        message: lang === 'he' ? 'התפקיד עודכן בהצלחה!' : 'Role updated successfully!'
+      })
+      setTimeout(() => setTeamToast(null), 3500)
+      await fetchTeamMembers()
+    } catch (err: any) {
+      setTeamToast({ type: 'error', message: err.message || 'Failed to update role.' })
+      setTimeout(() => setTeamToast(null), 4000)
+    } finally {
+      setUpdatingRoleMemberId(null)
+    }
+  }
+
+  const handleDeleteMember = async () => {
+    if (!memberToDelete) return
+    try {
+      setIsDeletingMember(true)
+      const res = await fetch('/api/crm/team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'DELETE_MEMBER',
+          memberId: memberToDelete.id
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to delete member.')
+      }
+      setTeamToast({
+        type: 'success',
+        message: lang === 'he' ? `חבר הצוות ${memberToDelete.name} הוסר מהמערכת.` : `Team member ${memberToDelete.name} removed successfully.`
+      })
+      setTimeout(() => setTeamToast(null), 3500)
+      setMemberToDelete(null)
+      await fetchTeamMembers()
+    } catch (err: any) {
+      setTeamToast({ type: 'error', message: err.message || 'Failed to delete member.' })
+      setTimeout(() => setTeamToast(null), 4000)
+    } finally {
+      setIsDeletingMember(false)
+    }
+  }
 
   // Count orders per brand
   const brandOrderCounts = React.useMemo(() => {
@@ -927,6 +1069,21 @@ export function CrmSettingsView({
       {/* TAB 4: TEAM ACCESS CONTROL */}
       {activeTab === 'team' && (
         <div className="bg-white dark:bg-[#0B0F17] rounded-2xl border border-slate-200/80 dark:border-slate-800 p-6 shadow-xs space-y-5 transition-colors">
+          {teamToast && (
+            <div
+              className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center justify-between ${
+                teamToast.type === 'success'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                  : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+              }`}
+            >
+              <span>{teamToast.message}</span>
+              <button onClick={() => setTeamToast(null)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                <XIcon className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
             <div>
               <div className="flex items-center gap-2">
@@ -934,12 +1091,25 @@ export function CrmSettingsView({
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">{t.teamTableTitle}</h3>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                {lang === 'he' ? 'ניהול משתמשי המערכת, תפקידים, והרשאות קליטה מטלגרם.' : 'Manage system dispatchers, couriers, and linked Telegram ingestion IDs.'}
+                {lang === 'he'
+                  ? 'ניהול משתמשי המערכת, תפקידים, והרשאות קליטה מטלגרם.'
+                  : 'Manage system dispatchers, couriers, and linked Telegram ingestion IDs.'}
               </p>
             </div>
 
             <button
-              onClick={() => alert(lang === 'he' ? 'להוספת משתמש חדש, בקש מהשליח/סדרן להירשם ב-/register או הוסף הרשאה ב-Supabase.' : 'To invite a new member, have them sign up at /register or grant privileges in Supabase.')}
+              onClick={() => {
+                setInviteName('')
+                setInviteEmail('')
+                setInvitePhone('')
+                setInviteTelegramId('')
+                setInviteRole('admin')
+                setInvitePassword('')
+                setInviteError(null)
+                setInviteSuccessCard(null)
+                generateRandomPassword()
+                setShowInviteModal(true)
+              }}
               className="px-4 py-2 rounded-xl bg-[#1E2235] hover:bg-[#4352E8] dark:bg-[#4352E8] dark:hover:bg-[#3442c7] text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
             >
               <PlusIcon className="w-3.5 h-3.5" />
@@ -947,63 +1117,120 @@ export function CrmSettingsView({
             </button>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-start text-xs">
-              <thead>
-                <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 dark:text-slate-500 font-bold uppercase text-[10px] tracking-wider">
-                  <th className="py-3 px-3 text-start">{lang === 'he' ? 'שם חבר הצוות' : 'Team Member Name'}</th>
-                  <th className="py-3 px-3 text-start">{lang === 'he' ? 'תפקיד' : 'Role'}</th>
-                  <th className="py-3 px-3 text-start">{lang === 'he' ? 'מזהה טלגרם מורשה' : 'Telegram Whitelist ID'}</th>
-                  <th className="py-3 px-3 text-start">{lang === 'he' ? 'טלפון / אימייל' : 'Contact'}</th>
-                  <th className="py-3 px-3 text-start">{lang === 'he' ? 'סטטוס' : 'Status'}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-                {teamMembers.map((member) => (
-                  <tr key={member.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
-                    <td className="py-3 px-3">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-slate-900 dark:bg-slate-800 text-white font-bold text-xs flex items-center justify-center border border-slate-700">
-                          {member.name.slice(0, 2).toUpperCase()}
-                        </div>
-                        <span className="font-bold text-slate-900 dark:text-white text-sm">{member.name}</span>
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-3">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
-                        member.role === 'System Admin'
-                          ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'
-                          : member.role === 'Dispatcher'
-                          ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-                          : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                      }`}>
-                        {member.role}
-                      </span>
-                    </td>
-
-                    <td className="py-3 px-3">
-                      <span className="font-mono font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200/60 dark:border-slate-700">
-                        {member.telegram_id}
-                      </span>
-                    </td>
-
-                    <td className="py-3 px-3 text-slate-600 dark:text-slate-300">
-                      <div>{member.email}</div>
-                      <div className="text-[11px] text-slate-400 dark:text-slate-500">{member.phone}</div>
-                    </td>
-
-                    <td className="py-3 px-3">
-                      <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-bold text-[11px]">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        {member.status}
-                      </span>
-                    </td>
+          {isLoadingTeam ? (
+            <div className="py-12 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
+              <RefreshIcon className="w-6 h-6 animate-spin text-[#4352E8]" />
+              <span className="text-xs font-semibold">{lang === 'he' ? 'טוען רשימת משתמשים...' : 'Loading team roster...'}</span>
+            </div>
+          ) : teamMembers.length === 0 ? (
+            <div className="py-10 text-center text-slate-400 text-xs">
+              {lang === 'he' ? 'לא נמצאו חברי צוות.' : 'No team members found.'}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-start text-xs">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 dark:text-slate-500 font-bold uppercase text-[10px] tracking-wider">
+                    <th className="py-3 px-3 text-start">{lang === 'he' ? 'שם חבר הצוות' : 'Team Member Name'}</th>
+                    <th className="py-3 px-3 text-start">{lang === 'he' ? 'תפקיד והרשאה' : 'Role & Privileges'}</th>
+                    <th className="py-3 px-3 text-start">{lang === 'he' ? 'מזהה טלגרם מורשה' : 'Telegram Whitelist ID'}</th>
+                    <th className="py-3 px-3 text-start">{lang === 'he' ? 'טלפון / אימייל' : 'Contact'}</th>
+                    <th className="py-3 px-3 text-start">{lang === 'he' ? 'סטטוס' : 'Status'}</th>
+                    {isCallerSuperAdmin && (
+                      <th className="py-3 px-3 text-end">{lang === 'he' ? 'פעולות' : 'Actions'}</th>
+                    )}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                  {teamMembers.map((member) => (
+                    <tr key={member.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
+                      <td className="py-3 px-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-lg bg-slate-900 dark:bg-slate-800 text-white font-bold text-xs flex items-center justify-center border border-slate-700">
+                            {member.name ? member.name.slice(0, 2).toUpperCase() : 'TM'}
+                          </div>
+                          <div>
+                            <span className="font-bold text-slate-900 dark:text-white text-sm block">{member.name}</span>
+                            {member.is_root_super_admin && (
+                              <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold">Owner</span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-3">
+                        {member.is_root_super_admin ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700 shadow-xs">
+                            👑 Primary Super Admin
+                          </span>
+                        ) : isCallerSuperAdmin ? (
+                          <select
+                            value={member.raw_role}
+                            disabled={updatingRoleMemberId === member.id}
+                            onChange={(e) => handleRoleChange(member.id, e.target.value)}
+                            className="px-2.5 py-1 rounded-lg text-xs font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#4352E8] cursor-pointer shadow-xs"
+                          >
+                            <option value="super_admin">👑 Super Admin</option>
+                            <option value="admin">🛡️ Dispatcher</option>
+                            <option value="courier">🛵 Courier Driver</option>
+                          </select>
+                        ) : (
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                              member.raw_role === 'super_admin'
+                                ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'
+                                : member.raw_role === 'admin'
+                                ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                                : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                            }`}
+                          >
+                            {member.role}
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-3">
+                        <span className="font-mono font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200/60 dark:border-slate-700">
+                          {member.telegram_id}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-3 text-slate-600 dark:text-slate-300">
+                        <div>{member.email}</div>
+                        <div className="text-[11px] text-slate-400 dark:text-slate-500 font-mono">{member.phone}</div>
+                      </td>
+
+                      <td className="py-3 px-3">
+                        <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-bold text-[11px]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          {member.status}
+                        </span>
+                      </td>
+
+                      {isCallerSuperAdmin && (
+                        <td className="py-3 px-3 text-end">
+                          {member.is_root_super_admin || member.id === userProfile?.id ? (
+                            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider inline-flex items-center gap-1">
+                              <ShieldIcon className="w-3.5 h-3.5 text-purple-500" />
+                              <span>Protected</span>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setMemberToDelete(member)}
+                              title={lang === 'he' ? 'מחק משתמש' : 'Delete Member'}
+                              className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -1086,6 +1313,334 @@ export function CrmSettingsView({
           </div>
         </div>
       )}
+
+      {/* Floating Team Management Toast */}
+      {teamToast && (
+        <div className="fixed bottom-6 end-6 z-50 animate-bounce">
+          <div
+            className={`px-4 py-3 rounded-2xl shadow-xl border flex items-center gap-2.5 text-xs font-bold ${
+              teamToast.type === 'success'
+                ? 'bg-emerald-600 text-white border-emerald-500 shadow-emerald-900/30'
+                : 'bg-rose-600 text-white border-rose-500 shadow-rose-900/30'
+            }`}
+          >
+            {teamToast.type === 'success' ? (
+              <CheckIcon className="w-4 h-4 text-white" />
+            ) : (
+              <ShieldIcon className="w-4 h-4 text-white" />
+            )}
+            <span>{teamToast.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Invite Team Member Modal */}
+      {showInviteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+          <div className="bg-white dark:bg-[#0E131F] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {inviteSuccessCard ? (
+              /* SUCCESS PROVISIONING CARD */
+              <div className="p-6 space-y-5">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                      <CheckIcon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        {lang === 'he' ? 'חשבון חבר צוות נוצר בהצלחה!' : 'Account Provisioned Successfully!'}
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {lang === 'he' ? 'הפרטים מוכנים לשיתוף ישיר בוואטסאפ או בטלגרם' : 'Ready to share directly via WhatsApp or Telegram'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowInviteModal(false)
+                      setInviteSuccessCard(null)
+                    }}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  >
+                    <XIcon className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Shareable Card Box */}
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-slate-100 space-y-3 font-mono text-xs shadow-inner">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-slate-400 text-[11px]">
+                    <span>Persian Team Dispatch Roster</span>
+                    <span className="text-emerald-400 font-bold uppercase">{inviteSuccessCard.role}</span>
+                  </div>
+                  <div className="space-y-1.5 text-xs text-slate-200">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">{lang === 'he' ? 'שם מלא:' : 'Name:'}</span>
+                      <span className="font-bold text-white">{inviteSuccessCard.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">{lang === 'he' ? 'אימייל:' : 'Email:'}</span>
+                      <span className="text-indigo-300 font-semibold">{inviteSuccessCard.email}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">{lang === 'he' ? 'סיסמה זמנית:' : 'Temp Password:'}</span>
+                      <span className="font-bold text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/80">
+                        {inviteSuccessCard.password}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">{lang === 'he' ? 'קישור התחברות:' : 'Login URL:'}</span>
+                      <span className="text-slate-300 text-[11px] underline truncate max-w-[200px]">
+                        {inviteSuccessCard.loginUrl}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+                  <button
+                    onClick={handleCopyInviteCard}
+                    className="w-full flex-1 py-3 px-4 rounded-xl bg-[#4352E8] hover:bg-[#3442c7] text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-md cursor-pointer"
+                  >
+                    <CopyIcon className="w-4 h-4" />
+                    <span>
+                      {inviteCardCopied
+                        ? (lang === 'he' ? 'הועתק ללוח!' : 'Copied to Clipboard!')
+                        : (lang === 'he' ? '📋 העתק כרטיס הזמנה (וואטסאפ/טלגרם)' : '📋 Copy WhatsApp / Telegram Invite')}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowInviteModal(false)
+                      setInviteSuccessCard(null)
+                    }}
+                    className="w-full sm:w-auto py-3 px-5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold transition cursor-pointer"
+                  >
+                    {lang === 'he' ? 'סגור' : 'Done'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* INVITATION FORM */
+              <form onSubmit={handleInviteSubmit} className="p-6 space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center text-[#4352E8] dark:text-indigo-400">
+                      <UsersIcon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        {lang === 'he' ? 'צירוף חבר צוות חדש' : 'Invite Team Member'}
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {lang === 'he' ? 'יצירת חשבון ישיר והנפקת סיסמה זמנית ללא כניסה ל-Supabase' : 'Direct account provisioning with instant shareable credentials'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowInviteModal(false)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  >
+                    <XIcon className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {inviteError && (
+                  <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-2">
+                    <ShieldIcon className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span>{inviteError}</span>
+                  </div>
+                )}
+
+                <div className="space-y-3.5">
+                  {/* Full Name */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      {lang === 'he' ? 'שם מלא' : 'Full Name'} <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={inviteName}
+                      onChange={(e) => setInviteName(e.target.value)}
+                      placeholder={lang === 'he' ? 'לדוגמה: תומר מנהל משמרת' : 'e.g. Tomer Dispatcher'}
+                      className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#4352E8]"
+                    />
+                  </div>
+
+                  {/* Email */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      {lang === 'he' ? 'כתובת אימייל' : 'Email Address'} <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      placeholder="name@domain.com"
+                      className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#4352E8]"
+                    />
+                  </div>
+
+                  {/* Role Selector */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      {lang === 'he' ? 'תפקיד והרשאה' : 'Role & Privileges'} <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={inviteRole}
+                      onChange={(e) => setInviteRole(e.target.value as any)}
+                      className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#4352E8] cursor-pointer"
+                    >
+                      {isCallerSuperAdmin && (
+                        <option value="super_admin">
+                          👑 {lang === 'he' ? 'סופר אדמין (ניהול מלא, שינוי תפקידים ומחיקת משתמשים)' : 'Super Admin (Full System & User Control)'}
+                        </option>
+                      )}
+                      <option value="admin">
+                        🛡️ {lang === 'he' ? 'סדרן / מנהל (ניהול הזמנות, קטלוג, מלאי וקופות)' : 'Dispatcher / Admin (Orders, Inventory & Settlements)'}
+                      </option>
+                      <option value="courier">
+                        🛵 {lang === 'he' ? 'שליח שטח (גישה לאפליקציית שליח בלבד)' : 'Courier Driver (Delivery App Only)'}
+                      </option>
+                    </select>
+                  </div>
+
+                  {/* Phone & Telegram Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        {lang === 'he' ? 'מספר טלפון' : 'Phone Number'}
+                      </label>
+                      <input
+                        type="text"
+                        value={invitePhone}
+                        onChange={(e) => setInvitePhone(e.target.value)}
+                        placeholder="050-1234567"
+                        className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#4352E8]"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        {lang === 'he' ? 'מזהה טלגרם' : 'Telegram Whitelist ID'}
+                      </label>
+                      <input
+                        type="text"
+                        value={inviteTelegramId}
+                        onChange={(e) => setInviteTelegramId(e.target.value)}
+                        placeholder="e.g. 5338301589"
+                        className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#4352E8]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Password */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        {lang === 'he' ? 'סיסמה זמנית' : 'Temporary Password'} <span className="text-rose-500">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={generateRandomPassword}
+                        className="text-[11px] font-bold text-[#4352E8] dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <RefreshIcon className="w-3 h-3" />
+                        <span>{lang === 'he' ? 'הגרל סיסמה' : 'Generate New'}</span>
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={invitePassword}
+                      onChange={(e) => setInvitePassword(e.target.value)}
+                      className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#4352E8]"
+                    />
+                  </div>
+                </div>
+
+                {/* Modal Footer Buttons */}
+                <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowInviteModal(false)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition cursor-pointer"
+                  >
+                    {lang === 'he' ? 'ביטול' : 'Cancel'}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingInvite}
+                    className="px-5 py-2 rounded-xl bg-[#4352E8] hover:bg-[#3442c7] disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-2 shadow-xs cursor-pointer"
+                  >
+                    {isSubmittingInvite && <RefreshIcon className="w-3.5 h-3.5 animate-spin" />}
+                    <span>{lang === 'he' ? 'צור חשבון והפק כרטיס' : 'Create & Generate Card'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete Member Confirmation Modal */}
+      {memberToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+          <div className="bg-white dark:bg-[#0E131F] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900/60 flex items-center justify-center text-rose-600 dark:text-rose-400 shrink-0">
+                  <TrashIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    {lang === 'he' ? 'מחיקת חבר צוות' : 'Delete Team Member'}
+                  </h3>
+                  <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold">
+                    {lang === 'he' ? 'פעולה זו תמחק את המשתמש לצמיתות מהמערכת' : 'Permanent action — cannot be undone'}
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                {lang === 'he' ? (
+                  <>
+                    האם אתה בטוח שברצונך למחוק את <strong>{memberToDelete.name}</strong> ({memberToDelete.email})? המשתמש יאבד מיידית את הגישה למערכת ויוסר מרשימת הצוות.
+                  </>
+                ) : (
+                  <>
+                    Are you sure you want to delete <strong>{memberToDelete.name}</strong> ({memberToDelete.email})? They will immediately lose access and be removed from all rosters.
+                  </>
+                )}
+              </p>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  disabled={isDeletingMember}
+                  onClick={() => setMemberToDelete(null)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition cursor-pointer"
+                >
+                  {lang === 'he' ? 'ביטול' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingMember}
+                  onClick={handleDeleteMember}
+                  className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-2 shadow-xs cursor-pointer"
+                >
+                  {isDeletingMember && <RefreshIcon className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{lang === 'he' ? 'מחק משתמש לצמיתות' : 'Delete Member'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
