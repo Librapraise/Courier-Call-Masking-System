@@ -153,7 +153,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-<<<<<<< HEAD
     // Security check: Couriers can only call customers assigned to them
     if (courierProfile.role === 'courier' && customer.assigned_courier_id !== courierProfile.id) {
       let isCrmAssigned = false
@@ -192,14 +191,6 @@ export async function POST(request: NextRequest) {
           { status: 403 }
         )
       }
-=======
-    if (customer.assigned_courier_id && customer.assigned_courier_id !== user.id) {
-      console.error('[API] /api/call/initiate - Customer assigned to another courier:', { customerAssigned: customer.assigned_courier_id, courierUser: user.id })
-      return NextResponse.json(
-        { error: 'Customer is assigned to another courier' },
-        { status: 403 }
-      )
->>>>>>> 32b985238416b88cee48816716cfdf36a5895ee0
     }
 
     console.log('[API] /api/call/initiate - Customer retrieved:', { 
