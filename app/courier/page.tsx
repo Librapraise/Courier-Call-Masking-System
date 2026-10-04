@@ -17,6 +17,7 @@ export default function CourierPage() {
   const router = useRouter()
 
   useEffect(() => {
+<<<<<<< HEAD
     loadCourierDeliveries()
   }, [])
 
@@ -28,6 +29,48 @@ export default function CourierPage() {
         router.push('/login?redirectTo=/courier')
         return
       }
+=======
+    initCourierPage()
+  }, [])
+
+  const initCourierPage = async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      router.push('/login')
+      return
+    }
+
+    // Verify user is a courier
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', session.user.id)
+      .single()
+
+    if (profile?.role !== 'courier') {
+      router.push('/admin')
+      return
+    }
+
+    await fetchCustomers(session.user.id)
+  }
+
+  const fetchCustomers = async (userId?: string) => {
+    try {
+      let courierId = userId
+      if (!courierId) {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) return
+        courierId = session.user.id
+      }
+
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id, name, is_active, is_completed, created_at, assigned_courier_id')
+        .eq('is_active', true)
+        .or(`assigned_courier_id.eq.${courierId},assigned_courier_id.is.null`)
+        .order('name', { ascending: true })
+>>>>>>> 32b985238416b88cee48816716cfdf36a5895ee0
 
       setCourierEmail(session.user.email || '')
 

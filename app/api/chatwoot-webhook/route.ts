@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { supabaseAdmin } from '@/lib/supabase/server'
 
 export async function POST(request: NextRequest) {
   console.log('[API] /api/chatwoot-webhook - Webhook received')
@@ -7,7 +8,73 @@ export async function POST(request: NextRequest) {
     const payload = await request.json()
     const { event, id: contactId, phone_number: currentPhoneNumber, contact_inboxes } = payload
 
-    // We only process contact_created events
+    // 1. Handle message_created events (incoming customer responses from Chatwoot)
+    if (event === 'message_created') {
+      const messageType = payload.message_type
+      const content = payload.content
+      const sender = payload.sender
+      const conversation = payload.conversation
+
+      // Only process incoming customer messages (message_type === 'incoming' or 0)
+      if ((messageType === 'incoming' || messageType === 0) && content) {
+        let rawPhone = sender?.phone_number || 
+                       conversation?.meta?.sender?.phone_number || 
+                       payload.contact?.phone_number || 
+                       ''
+
+        if (!rawPhone && conversation?.contact_inbox?.source_id) {
+          rawPhone = conversation.contact_inbox.source_id
+        }
+
+        const cleanPhone = rawPhone.replace('whatsapp:', '').trim()
+        const senderName = sender?.name || conversation?.meta?.sender?.name || null
+
+        console.log(`[API] /api/chatwoot-webhook - Received incoming message from Chatwoot for phone: ${cleanPhone}`)
+
+        if (cleanPhone) {
+          // Look up customer in Supabase
+          let customerId: string | null = null
+          const { data: customerMatch } = await supabaseAdmin
+            .from('customers')
+            .select('id')
+            .eq('phone_number', cleanPhone)
+            .maybeSingle()
+
+          if (customerMatch) {
+            customerId = customerMatch.id
+          } else {
+            const lastDigits = cleanPhone.slice(-9)
+            if (lastDigits.length >= 7) {
+              const { data: fuzzyMatch } = await supabaseAdmin
+                .from('customers')
+                .select('id')
+                .ilike('phone_number', `%${lastDigits}`)
+                .maybeSingle()
+              if (fuzzyMatch) {
+                customerId = fuzzyMatch.id
+              }
+            }
+          }
+
+          // Save reply into whatsapp_replies table
+          await supabaseAdmin
+            .from('whatsapp_replies')
+            .insert({
+              customer_id: customerId,
+              phone_number: cleanPhone,
+              profile_name: senderName,
+              message_body: content.trim(),
+              message_sid: payload.id ? String(payload.id) : null,
+            })
+
+          console.log(`[API] /api/chatwoot-webhook - Saved Chatwoot incoming message to whatsapp_replies in Supabase`)
+        }
+      }
+
+      return NextResponse.json({ message: 'Message event processed' }, { status: 200 })
+    }
+
+    // 2. We only process contact_created events for phone number syncing
     if (event !== 'contact_created') {
       console.log(`[API] /api/chatwoot-webhook - Skipping event: ${event}`)
       return NextResponse.json({ message: `Skipping event: ${event}` }, { status: 200 })

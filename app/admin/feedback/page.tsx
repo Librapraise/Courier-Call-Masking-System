@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
 import Navigation from '@/components/Navigation'
-import type { Feedback } from '@/types/database'
+import type { Feedback, WhatsAppReply } from '@/types/database'
 
 export default function AdminFeedbackPage() {
   const [feedbackList, setFeedbackList] = useState<Feedback[]>([])
+  const [whatsappReplies, setWhatsappReplies] = useState<WhatsAppReply[]>([])
+  const [activeTab, setActiveTab] = useState<'feedback' | 'whatsapp'>('feedback')
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -16,7 +18,7 @@ export default function AdminFeedbackPage() {
 
   useEffect(() => {
     checkAuth()
-    fetchFeedback()
+    fetchData()
   }, [])
 
   const checkAuth = async () => {
@@ -37,11 +39,12 @@ export default function AdminFeedbackPage() {
     }
   }
 
-  const fetchFeedback = async () => {
+  const fetchData = async () => {
     try {
       setLoading(true)
-      // Query feedback joining customers and profiles (couriers) tables
-      const { data, error } = await supabase
+
+      // 1. Fetch form feedback joining customers & profiles
+      const { data: feedbackData, error: feedbackError } = await supabase
         .from('feedback')
         .select(`
           id,
@@ -51,18 +54,14 @@ export default function AdminFeedbackPage() {
           product_quality_rating,
           comment,
           created_at,
-          customers (
-            name
-          ),
-          profiles (
-            email
-          )
+          customers ( name ),
+          profiles ( email )
         `)
         .order('created_at', { ascending: false })
 
-      if (error) throw error
+      if (feedbackError) throw feedbackError
 
-      const formatted = (data || []).map((item: any) => ({
+      const formattedFeedback = (feedbackData || []).map((item: any) => ({
         id: item.id,
         customer_id: item.customer_id,
         courier_id: item.courier_id,
@@ -74,16 +73,50 @@ export default function AdminFeedbackPage() {
         courier_email: item.profiles?.email || 'Unassigned',
       }))
 
-      setFeedbackList(formatted)
+      setFeedbackList(formattedFeedback)
+
+      // 2. Fetch direct WhatsApp replies joining customers if possible
+      try {
+        const { data: repliesData, error: repliesError } = await supabase
+          .from('whatsapp_replies')
+          .select(`
+            id,
+            customer_id,
+            phone_number,
+            profile_name,
+            message_body,
+            message_sid,
+            created_at,
+            customers ( name )
+          `)
+          .order('created_at', { ascending: false })
+
+        if (!repliesError && repliesData) {
+          const formattedReplies = repliesData.map((item: any) => ({
+            id: item.id,
+            customer_id: item.customer_id,
+            phone_number: item.phone_number,
+            profile_name: item.profile_name,
+            message_body: item.message_body,
+            message_sid: item.message_sid,
+            created_at: item.created_at,
+            customer_name: item.customers?.name || item.profile_name || 'Customer',
+          }))
+          setWhatsappReplies(formattedReplies)
+        }
+      } catch (e) {
+        console.warn('whatsapp_replies table might not exist yet:', e)
+      }
+
     } catch (err: any) {
-      console.error('Error fetching feedback:', err)
+      console.error('Error fetching feedback/replies:', err)
       setMessage({ type: 'error', text: err.message || 'Failed to load feedback records' })
     } finally {
       setLoading(false)
     }
   }
 
-  const handleDelete = async (id: string) => {
+  const handleDeleteFeedback = async (id: string) => {
     if (!confirm('Are you sure you want to permanently delete this feedback record?')) return
 
     try {
@@ -98,6 +131,24 @@ export default function AdminFeedbackPage() {
       setFeedbackList(prev => prev.filter(item => item.id !== id))
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Failed to delete feedback' })
+    }
+  }
+
+  const handleDeleteWhatsAppReply = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this WhatsApp reply?')) return
+
+    try {
+      const { error } = await supabase
+        .from('whatsapp_replies')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+
+      setMessage({ type: 'success', text: 'WhatsApp reply deleted successfully!' })
+      setWhatsappReplies(prev => prev.filter(item => item.id !== id))
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to delete WhatsApp reply' })
     }
   }
 
@@ -130,10 +181,12 @@ export default function AdminFeedbackPage() {
 
   // Calculate statistics
   const totalReviews = feedbackList.length
+  const totalWhatsAppReplies = whatsappReplies.length
+
   const avgDeliveryRating = totalReviews > 0
     ? (feedbackList.reduce((sum, item) => sum + item.delivery_time_rating, 0) / totalReviews).toFixed(1)
     : '0.0'
-  
+
   const avgProductRating = totalReviews > 0
     ? (feedbackList.reduce((sum, item) => sum + item.product_quality_rating, 0) / totalReviews).toFixed(1)
     : '0.0'
@@ -142,7 +195,7 @@ export default function AdminFeedbackPage() {
     ? ((parseFloat(avgDeliveryRating) + parseFloat(avgProductRating)) / 2).toFixed(1)
     : '0.0'
 
-  // Filter feedback list based on search query
+  // Filter lists based on search query
   const filteredFeedback = searchQuery.trim()
     ? feedbackList.filter(item =>
         item.customer_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -151,10 +204,19 @@ export default function AdminFeedbackPage() {
       )
     : feedbackList
 
+  const filteredWhatsApp = searchQuery.trim()
+    ? whatsappReplies.filter(item =>
+        item.customer_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.phone_number?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.message_body?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.profile_name?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : whatsappReplies
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <p className="text-gray-600">Loading feedback reviews...</p>
+        <p className="text-gray-600">Loading customer reviews and WhatsApp responses...</p>
       </div>
     )
   }
@@ -176,9 +238,9 @@ export default function AdminFeedbackPage() {
       <main className="mx-auto max-w-7xl px-4 py-6 sm:py-8 sm:px-6 lg:px-8">
         <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Customer Reviews</h2>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Customer Reviews & Responses</h2>
             <p className="mt-1 text-xs sm:text-sm text-gray-600">
-              Monitor customer feedback about products and courier services
+              Monitor customer feedback rating submissions and direct WhatsApp replies
             </p>
           </div>
         </div>
@@ -196,15 +258,12 @@ export default function AdminFeedbackPage() {
         {/* Stats Section */}
         <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-4">
           <div className="rounded-xl bg-white p-6 shadow border border-gray-100">
-            <p className="text-sm font-semibold text-gray-500">Total Feedbacks</p>
+            <p className="text-sm font-semibold text-gray-500">Web Form Reviews</p>
             <p className="mt-2 text-3xl font-bold text-gray-900">{totalReviews}</p>
           </div>
           <div className="rounded-xl bg-white p-6 shadow border border-gray-100">
-            <p className="text-sm font-semibold text-gray-500">Overall Rating</p>
-            <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-gray-900">{overallAvg}</span>
-              <span className="text-sm text-gray-400">/ 5.0</span>
-            </div>
+            <p className="text-sm font-semibold text-gray-500">WhatsApp Replies</p>
+            <p className="mt-2 text-3xl font-bold text-emerald-600">{totalWhatsAppReplies}</p>
           </div>
           <div className="rounded-xl bg-white p-6 shadow border border-gray-100">
             <p className="text-sm font-semibold text-gray-500">Delivery & Service Avg</p>
@@ -222,96 +281,189 @@ export default function AdminFeedbackPage() {
           </div>
         </div>
 
-        {/* Search */}
-        <div className="mb-6">
+        {/* Tabs & Search */}
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex rounded-lg bg-gray-200 p-1 w-fit">
+            <button
+              onClick={() => setActiveTab('feedback')}
+              className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                activeTab === 'feedback'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              ⭐ Form Reviews ({feedbackList.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('whatsapp')}
+              className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                activeTab === 'whatsapp'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              💬 WhatsApp Replies ({whatsappReplies.length})
+            </button>
+          </div>
+
           <input
             type="text"
-            placeholder="Search by customer name, courier email, or comments..."
+            placeholder={
+              activeTab === 'feedback'
+                ? 'Search by customer name, courier email, or comments...'
+                : 'Search by phone, profile name, or WhatsApp message body...'
+            }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-black text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full sm:w-80 rounded-xl border border-gray-300 bg-white px-4 py-2 text-black text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
 
-        {/* Reviews Table */}
-        <div className="overflow-x-auto rounded-xl bg-white shadow border border-gray-100">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Customer
-                </th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Courier
-                </th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Delivery Speed
-                </th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Product Quality
-                </th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Comment
-                </th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Submitted At
-                </th>
-                <th className="px-6 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
-              {filteredFeedback.length === 0 ? (
+        {/* Form Reviews Table */}
+        {activeTab === 'feedback' && (
+          <div className="overflow-x-auto rounded-xl bg-white shadow border border-gray-100">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
                 <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-sm text-gray-500">
-                    {searchQuery.trim() ? 'No reviews match your query' : 'No customer reviews recorded yet'}
-                  </td>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    Customer
+                  </th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    Courier
+                  </th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    Delivery Speed
+                  </th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    Product Quality
+                  </th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    Comment
+                  </th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    Submitted At
+                  </th>
+                  <th className="px-6 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    Actions
+                  </th>
                 </tr>
-              ) : (
-                filteredFeedback.map((feedback) => (
-                  <tr key={feedback.id} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-6 py-4 text-sm font-semibold text-gray-900">
-                      {feedback.customer_name}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-500 font-mono text-xs">
-                      {feedback.courier_email}
-                    </td>
-                    <td className="px-6 py-4 text-sm">
-                      <div className="flex flex-col gap-1">
-                        {renderStars(feedback.delivery_time_rating)}
-                        <span className="text-xs font-medium text-gray-400">({feedback.delivery_time_rating} / 5)</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm">
-                      <div className="flex flex-col gap-1">
-                        {renderStars(feedback.product_quality_rating)}
-                        <span className="text-xs font-medium text-gray-400">({feedback.product_quality_rating} / 5)</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600 max-w-xs break-words">
-                      {feedback.comment || <span className="text-gray-300 italic">No comment left</span>}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">
-                      {new Date(feedback.created_at).toLocaleString('en-US', {
-                        dateStyle: 'medium',
-                        timeStyle: 'short',
-                      })}
-                    </td>
-                    <td className="px-6 py-4 text-right text-sm">
-                      <button
-                        onClick={() => handleDelete(feedback.id)}
-                        className="rounded-md bg-red-50 text-red-600 px-3 py-1.5 hover:bg-red-100 transition-colors font-medium text-xs"
-                      >
-                        Delete
-                      </button>
+              </thead>
+              <tbody className="divide-y divide-gray-200 bg-white">
+                {filteredFeedback.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-8 text-center text-sm text-gray-500">
+                      {searchQuery.trim() ? 'No reviews match your query' : 'No customer reviews recorded yet'}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ) : (
+                  filteredFeedback.map((feedback) => (
+                    <tr key={feedback.id} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="px-6 py-4 text-sm font-semibold text-gray-900">
+                        {feedback.customer_name}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-500 font-mono text-xs">
+                        {feedback.courier_email}
+                      </td>
+                      <td className="px-6 py-4 text-sm">
+                        <div className="flex flex-col gap-1">
+                          {renderStars(feedback.delivery_time_rating)}
+                          <span className="text-xs font-medium text-gray-400">({feedback.delivery_time_rating} / 5)</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-sm">
+                        <div className="flex flex-col gap-1">
+                          {renderStars(feedback.product_quality_rating)}
+                          <span className="text-xs font-medium text-gray-400">({feedback.product_quality_rating} / 5)</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600 max-w-xs break-words">
+                        {feedback.comment || <span className="text-gray-300 italic">No comment left</span>}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-500">
+                        {new Date(feedback.created_at).toLocaleString('en-US', {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        })}
+                      </td>
+                      <td className="px-6 py-4 text-right text-sm">
+                        <button
+                          onClick={() => handleDeleteFeedback(feedback.id)}
+                          className="rounded-md bg-red-50 text-red-600 px-3 py-1.5 hover:bg-red-100 transition-colors font-medium text-xs"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* WhatsApp Direct Responses Table */}
+        {activeTab === 'whatsapp' && (
+          <div className="overflow-x-auto rounded-xl bg-white shadow border border-gray-100">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-emerald-50/50">
+                <tr>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-emerald-800">
+                    Customer / Sender
+                  </th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-emerald-800">
+                    Phone Number
+                  </th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-emerald-800">
+                    WhatsApp Message Response
+                  </th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-emerald-800">
+                    Received At
+                  </th>
+                  <th className="px-6 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-emerald-800">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 bg-white">
+                {filteredWhatsApp.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500">
+                      {searchQuery.trim() ? 'No WhatsApp responses match your query' : 'No direct WhatsApp text replies received yet'}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredWhatsApp.map((reply) => (
+                    <tr key={reply.id} className="hover:bg-emerald-50/20 transition-colors">
+                      <td className="px-6 py-4 text-sm font-semibold text-gray-900">
+                        {reply.customer_name}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-500 font-mono text-xs">
+                        {reply.phone_number}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-800 font-medium max-w-md break-words bg-gray-50/50 rounded-md p-3">
+                        💬 "{reply.message_body}"
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-500">
+                        {new Date(reply.created_at).toLocaleString('en-US', {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        })}
+                      </td>
+                      <td className="px-6 py-4 text-right text-sm">
+                        <button
+                          onClick={() => handleDeleteWhatsAppReply(reply.id)}
+                          className="rounded-md bg-red-50 text-red-600 px-3 py-1.5 hover:bg-red-100 transition-colors font-medium text-xs"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </main>
     </div>
   )
