@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
+import { isSuperAdminUser } from '@/lib/auth/roles'
 import {
   UserIcon,
   ShieldIcon,
@@ -128,7 +129,7 @@ export function CrmSettingsView({
   const [isDeletingMember, setIsDeletingMember] = useState(false)
 
   const isCallerSuperAdmin =
-    userProfile?.email === 'feelgee8@gmail.com' ||
+    isSuperAdminUser(userProfile) ||
     userProfile?.role === 'Super Admin' ||
     !!userProfile?.is_super_admin
 

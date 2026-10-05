@@ -3,6 +3,7 @@ import twilio from 'twilio'
 import { supabaseAdmin } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { isStaffUser } from '@/lib/auth/roles'
 
 /**
  * Syncs stuck call logs ('attempted', 'ringing') or missing recordings with Twilio REST API
@@ -46,7 +47,7 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    if (profile?.role !== 'admin') {
+    if (!isStaffUser(user, profile)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 

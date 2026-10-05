@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, supabaseAdmin } from '@/lib/supabase/server'
+import { isSuperAdminUser, isStaffUser } from '@/lib/auth/roles'
 
 export async function GET() {
   try {
@@ -28,7 +29,7 @@ export async function GET() {
     const phoneNumber = profile?.phone_number || meta.phone_number || ''
     const telegramId = meta.telegram_id || ''
 
-    const isSuperAdmin = user.email === 'feelgee8@gmail.com' || meta.role === 'super_admin' || meta.is_super_admin === true
+    const isSuperAdmin = isSuperAdminUser(user, profile)
     const userRole = profile?.role || meta.role
     const roleTitle = isSuperAdmin
       ? 'Super Admin'
@@ -86,7 +87,10 @@ export async function POST(request: Request) {
         .eq('id', user.id)
         .single()
 
-      if (profile?.role !== 'admin') {
+      const isSuperAdmin = isSuperAdminUser(user, profile)
+      const isStaff = isStaffUser(user, profile)
+
+      if (!isSuperAdmin && !isStaff) {
         return NextResponse.json(
           { error: 'Forbidden: Admin privileges required to update other accounts.' },
           { status: 403 }

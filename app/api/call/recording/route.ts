@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import twilio from 'twilio'
 import { validateTwilioWebhook } from '@/lib/twilio/webhook'
 import { supabaseAdmin } from '@/lib/supabase/server'
+import { isStaffUser, isSuperAdminUser } from '@/lib/auth/roles'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 
@@ -174,8 +175,10 @@ export async function DELETE(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    if (profile?.role !== 'admin') {
-      console.error('[API] /api/call/recording DELETE - Forbidden, role:', profile?.role)
+    const isSuperAdmin = isSuperAdminUser(user, profile)
+    const isStaff = isStaffUser(user, profile)
+    if (!isSuperAdmin && !isStaff) {
+      console.error('[API] /api/call/recording DELETE - Forbidden, user:', user.id)
       return NextResponse.json({ error: 'Only admins can delete recordings' }, { status: 403 })
     }
 

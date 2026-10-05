@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
 import type { Customer } from '@/types/database'
 import Navigation from '@/components/Navigation'
+import { isStaffUser } from '@/lib/auth/roles'
 
 interface TestResult {
   id: string
@@ -41,13 +42,17 @@ export default function TestingPage() {
       return
     }
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', session.user.id)
-      .single()
+    let profileRole: string | undefined = session.user.user_metadata?.role
+    if (!profileRole) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .maybeSingle()
+      profileRole = profile?.role
+    }
 
-    if (profile?.role !== 'admin') {
+    if (!isStaffUser(session.user, { role: profileRole })) {
       router.push('/courier')
     }
   }

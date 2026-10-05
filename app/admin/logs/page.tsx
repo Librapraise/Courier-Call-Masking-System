@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
 import type { CallLog } from '@/types/database'
 import Navigation from '@/components/Navigation'
+import { isStaffUser } from '@/lib/auth/roles'
 
 export default function CallLogsPage() {
   const [logs, setLogs] = useState<CallLog[]>([])
@@ -46,13 +47,17 @@ export default function CallLogsPage() {
     // Store token so audio stream URLs can authenticate
     setSessionToken(session.access_token)
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', session.user.id)
-      .single()
+    let profileRole: string | undefined = session.user.user_metadata?.role
+    if (!profileRole) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .maybeSingle()
+      profileRole = profile?.role
+    }
 
-    if (profile?.role !== 'admin') {
+    if (!isStaffUser(session.user, { role: profileRole })) {
       router.push('/courier')
     }
   }

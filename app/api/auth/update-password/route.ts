@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, supabaseAdmin } from '@/lib/supabase/server'
+import { isSuperAdminUser, isStaffUser } from '@/lib/auth/roles'
 
 export async function POST(request: Request) {
   try {
@@ -34,7 +35,10 @@ export async function POST(request: Request) {
         .eq('id', user.id)
         .single()
 
-      if (profile?.role !== 'admin') {
+      const isSuperAdmin = isSuperAdminUser(user, profile)
+      const isStaff = isStaffUser(user, profile)
+
+      if (!isSuperAdmin && !isStaff) {
         return NextResponse.json(
           { error: 'Forbidden: Admin privileges required to update other accounts.' },
           { status: 403 }

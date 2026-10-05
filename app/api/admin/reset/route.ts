@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
+import { isStaffUser } from '@/lib/auth/roles'
 
 /**
  * Daily reset endpoint
@@ -76,9 +77,7 @@ export async function POST(request: NextRequest) {
         .eq('id', user!.id)
         .single()
 
-      console.log('[API] /api/admin/reset - User role:', profile?.role)
-
-      if (profile?.role !== 'admin') {
+      if (!isStaffUser(user, profile)) {
         console.error('[API] /api/admin/reset - Unauthorized role:', profile?.role)
         return NextResponse.json(
           { error: 'Only admins can reset the list' },

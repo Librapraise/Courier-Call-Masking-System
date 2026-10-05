@@ -3,6 +3,7 @@ import { supabaseAdmin, createClient } from '@/lib/supabase/server'
 import { BRANDS_LIST } from '@/lib/crm/catalog-data'
 import { sendTelegramMessage } from '@/lib/crm/telegram-bot'
 import { formatPhoneForStorage } from '@/lib/utils/phone'
+import { isStaffUser } from '@/lib/auth/roles'
 
 export async function GET() {
   try {
@@ -20,11 +21,7 @@ export async function GET() {
       .eq('id', user.id)
       .single()
 
-    const isSuper = user.email === 'feelgee8@gmail.com' || user.user_metadata?.role === 'super_admin' || user.user_metadata?.is_super_admin === true
-    const allowedRoles = ['admin', 'super_admin', 'warehouseman']
-    const userRole = profile?.role || user.user_metadata?.role
-
-    if (!isSuper && (!userRole || !allowedRoles.includes(userRole))) {
+    if (!isStaffUser(user, profile)) {
       return NextResponse.json({ error: 'Forbidden: Admin, Super Admin, or Warehouseman privileges required.' }, { status: 403 })
     }
     // 1. Fetch Orders with Customer, Brand, and Courier relationships
@@ -260,9 +257,7 @@ export async function POST(req: Request) {
       .eq('id', user.id)
       .single()
 
-    const isSuper = user.email === 'feelgee8@gmail.com' || user.user_metadata?.role === 'super_admin' || user.user_metadata?.is_super_admin === true
-    const allowedRoles = ['admin', 'super_admin', 'warehouseman']
-    if (!isSuper && (!profile?.role || !allowedRoles.includes(profile.role))) {
+    if (!isStaffUser(user, profile)) {
       return NextResponse.json({ error: 'Forbidden: Admin, Super Admin, or Warehouseman privileges required.' }, { status: 403 })
     }
 

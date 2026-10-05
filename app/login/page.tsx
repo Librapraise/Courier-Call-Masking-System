@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase/client'
 import { EyeIcon, EyeOffIcon } from '@/components/crm/CrmIcons'
 import { GhostCrmLogoIcon } from '@/components/crm/GhostCrmLogo'
+import { isStaffUser } from '@/lib/auth/roles'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -43,15 +44,7 @@ export default function LoginPage() {
         const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
         const redirectTo = params?.get('redirectTo')
 
-        const isCrmStaff =
-          data.user.email === 'feelgee8@gmail.com' ||
-          profile?.role === 'admin' ||
-          profile?.role === 'super_admin' ||
-          profile?.role === 'warehouseman' ||
-          data.user.user_metadata?.role === 'super_admin' ||
-          data.user.user_metadata?.role === 'warehouseman'
-
-        if (isCrmStaff) {
+        if (isStaffUser(data.user, profile)) {
           router.push(redirectTo && redirectTo.startsWith('/') ? redirectTo : '/crm')
         } else {
           router.push('/courier')

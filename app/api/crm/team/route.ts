@@ -1,15 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, supabaseAdmin } from '@/lib/supabase/server'
 import { formatPhoneForStorage } from '@/lib/utils/phone'
-
-const ROOT_SUPER_ADMIN_EMAIL = 'feelgee8@gmail.com'
-
-function checkIsSuperAdmin(user: any): boolean {
-  if (!user) return false
-  if (user.email === ROOT_SUPER_ADMIN_EMAIL) return true
-  const meta = user.user_metadata || {}
-  return meta.role === 'super_admin' || meta.is_super_admin === true
-}
+import { ROOT_SUPER_ADMIN_EMAIL, isSuperAdminUser as checkIsSuperAdmin } from '@/lib/auth/roles'
 
 export async function GET() {
   try {

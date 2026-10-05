@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
+import { isStaffUser } from '@/lib/auth/roles'
 
 /**
  * Debug endpoint: returns info about a call log's recording URL and Twilio response
@@ -26,7 +27,9 @@ export async function GET(request: NextRequest) {
   }
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { data: profile } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).single()
-  if (profile?.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!isStaffUser(user, profile)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const id = request.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'Missing id param' }, { status: 400 })

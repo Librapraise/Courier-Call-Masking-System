@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase/client'
 import type { Setting } from '@/types/database'
 import { formatPhoneForDisplay, formatPhoneForStorage } from '@/lib/utils/phone'
 import Navigation from '@/components/Navigation'
+import { isStaffUser } from '@/lib/auth/roles'
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Record<string, string>>({})
@@ -27,13 +28,17 @@ export default function SettingsPage() {
       return
     }
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', session.user.id)
-      .single()
+    let profileRole: string | undefined = session.user.user_metadata?.role
+    if (!profileRole) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .maybeSingle()
+      profileRole = profile?.role
+    }
 
-    if (profile?.role !== 'admin') {
+    if (!isStaffUser(session.user, { role: profileRole })) {
       router.push('/courier')
     }
   }

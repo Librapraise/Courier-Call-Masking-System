@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase/client'
 import type { Customer, Profile } from '@/types/database'
 import { formatPhoneForDisplay, formatPhoneForStorage, isValidPhoneFormat } from '@/lib/utils/phone'
 import Navigation from '@/components/Navigation'
+import { isStaffUser } from '@/lib/auth/roles'
 
 export default function AdminPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -39,14 +40,18 @@ export default function AdminPage() {
 
     setCurrentUserId(session.user.id)
 
-    // Verify user is an admin
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', session.user.id)
-      .single()
+    // Check user_metadata first (instant, guaranteed, zero RLS recursion)
+    let profileRole: string | undefined = session.user.user_metadata?.role
+    if (!profileRole) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .maybeSingle()
+      profileRole = profile?.role
+    }
 
-    if (profile?.role !== 'admin') {
+    if (!isStaffUser(session.user, { role: profileRole })) {
       router.push('/courier')
     }
   }

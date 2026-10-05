@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, supabaseAdmin } from '@/lib/supabase/server'
+import { isSuperAdminUser, isStaffUser } from '@/lib/auth/roles'
 
 export async function GET(request: NextRequest) {
   console.log('[API] /api/chatwoot-sync-past - Starting sync of past contacts')
@@ -19,7 +20,10 @@ export async function GET(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    if (profile?.role !== 'admin') {
+    const isSuperAdmin = isSuperAdminUser(user, profile)
+    const isStaff = isStaffUser(user, profile)
+
+    if (!isSuperAdmin && !isStaff) {
       return NextResponse.json({ error: 'Forbidden: Admin access required.' }, { status: 403 })
     }
 

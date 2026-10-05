@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/server'
 import { createClient } from '@supabase/supabase-js'
+import { isStaffUser } from '@/lib/auth/roles'
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    if (profileError || profile?.role !== 'admin') {
+    if (!isStaffUser(user, profile)) {
       return NextResponse.json(
         { error: 'Forbidden - Admin access required' },
         { status: 403 }

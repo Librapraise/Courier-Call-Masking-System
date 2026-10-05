@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase/client'
 import { TRANSLATIONS, Language } from '@/lib/crm/translations'
 import { parseSingleOrderMessage, ParsedDeliveryOrder } from '@/lib/crm/parser'
+import { isSuperAdminUser, isStaffUser } from '@/lib/auth/roles'
 import GhostCrmLogo, { GhostCrmLogoIcon } from '@/components/crm/GhostCrmLogo'
 import {
   GridIcon,
@@ -339,11 +340,9 @@ export default function GhostCrmDashboard() {
           .eq('id', activeUser.id)
           .single()
 
-        const isSuper = activeUser.email === 'feelgee8@gmail.com' || activeUser.user_metadata?.role === 'super_admin' || activeUser.user_metadata?.is_super_admin === true
-        const allowedRoles = ['admin', 'super_admin', 'warehouseman']
-        const userRole = profile?.role || activeUser.user_metadata?.role
+        const isSuper = isSuperAdminUser(activeUser)
 
-        if (!isSuper && (profileError || !userRole || !allowedRoles.includes(userRole))) {
+        if (!isStaffUser(activeUser, profile)) {
           console.warn('[GhostCRM Auth Guard] Unauthorized user attempted to access /crm. Redirecting to courier portal.')
           window.location.href = '/courier'
           return

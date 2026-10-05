@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { supabaseAdmin } from '@/lib/supabase/server'
+import { isStaffUser } from '@/lib/auth/roles'
 
 export const runtime = 'nodejs'
 
@@ -39,8 +40,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const { data: profile } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).single()
-  if (profile?.role !== 'admin') {
-    console.error('[Stream] Forbidden – user is not admin:', user.id)
+  if (!isStaffUser(user, profile)) {
+    console.error('[Stream] Forbidden – user is not authorized staff:', user.id)
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
