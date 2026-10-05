@@ -214,7 +214,8 @@ export default function GhostCrmDashboard() {
   const [isSubmittingAdjust, setIsSubmittingAdjust] = useState(false)
 
   const [settlingCourier, setSettlingCourier] = useState<Courier | null>(null)
-  const [receivedCashInput, setReceivedCashInput] = useState<string>('')
+  const [grossInput, setGrossInput] = useState<string>('')
+  const [bonusInput, setBonusInput] = useState<string>('0')
   const [settlementNotes, setSettlementNotes] = useState<string>('')
   const [isSubmittingSettle, setIsSubmittingSettle] = useState(false)
   const [isPurgingDemo, setIsPurgingDemo] = useState(false)
@@ -338,13 +339,16 @@ export default function GhostCrmDashboard() {
           .eq('id', activeUser.id)
           .single()
 
-        if (profileError || profile?.role !== 'admin') {
-          console.warn('[GhostCRM Auth Guard] Non-admin user attempted to access /crm. Redirecting to courier portal.')
+        const isSuper = activeUser.email === 'feelgee8@gmail.com' || activeUser.user_metadata?.role === 'super_admin' || activeUser.user_metadata?.is_super_admin === true
+        const allowedRoles = ['admin', 'super_admin']
+
+        if (!isSuper && (profileError || !profile?.role || !allowedRoles.includes(profile.role))) {
+          console.warn('[GhostCRM Auth Guard] Unauthorized user attempted to access /crm. Redirecting to courier portal.')
           window.location.href = '/courier'
           return
         }
 
-        const roleName = 'System Admin'
+        const roleName = isSuper || profile?.role === 'super_admin' ? 'Super Admin' : 'System Admin'
         const meta = activeUser.user_metadata || {}
         const displayName =
           meta.full_name || meta.name || (activeUser.email ? activeUser.email.split('@')[0] : 'Admin')
@@ -800,11 +804,12 @@ export default function GhostCrmDashboard() {
     e.preventDefault()
     if (!settlingCourier) return
 
-    const actual = parseFloat(receivedCashInput)
-    if (isNaN(actual) || actual < 0) {
-      alert('Please enter a valid cash amount')
+    const gross = parseFloat(grossInput)
+    if (isNaN(gross) || gross < 0) {
+      alert('Please enter a valid gross cash amount')
       return
     }
+    const bonus = Math.max(0, parseFloat(bonusInput) || 0)
 
     try {
       setIsSubmittingSettle(true)
@@ -814,11 +819,13 @@ export default function GhostCrmDashboard() {
         body: JSON.stringify({
           action: 'SETTLE_COURIER',
           courierId: settlingCourier.id,
-          amountReceived: actual,
+          grossCollected: gross,
+          bonusAmount: bonus,
           notes: settlementNotes
         })
       })
-      if (!res.ok) throw new Error('Settlement failed')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Settlement failed')
       setNotification(t.shiftClosedAlert)
       setSettlingCourier(null)
       fetchData()
@@ -908,9 +915,14 @@ export default function GhostCrmDashboard() {
     )
   }
 
-  const expectedCash = settlingCourier?.todayCash || 0
-  const parsedReceivedCash = parseFloat(receivedCashInput) || 0
-  const settlementDiff = parsedReceivedCash - expectedCash
+  // Computed settlement values (frontend preview using 100 NIS standard rate)
+  const settleOrderCount  = settlingCourier?.todayOrders || 0
+  const parsedGross       = parseFloat(grossInput) || 0
+  const parsedBonus       = Math.max(0, parseFloat(bonusInput) || 0)
+  // Preview: assume all are standard (backend will do exact Bat Yam split)
+  const previewDeliveryFees = settleOrderCount * 100
+  const previewCourierPay   = previewDeliveryFees + parsedBonus
+  const previewNet          = Math.max(0, parsedGross - previewCourierPay)
 
   return (
     <div
@@ -1119,86 +1131,120 @@ export default function GhostCrmDashboard() {
       {/* MODAL 2: COURIER SETTLEMENT                               */}
       {/* ======================================================== */}
       {settlingCourier && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div
-            className="w-full max-w-md rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-4"
+            className="w-full max-w-lg rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
             dir={isRtl ? 'rtl' : 'ltr'}
           >
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <WalletIcon className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                <span>{t.settleModalTitle}</span>
-              </h3>
+            {/* Modal Header */}
+            <div className="flex items-center justify-between bg-emerald-600 dark:bg-emerald-700 px-5 py-4">
+              <div className="flex items-center gap-2.5">
+                <WalletIcon className="w-5 h-5 text-white" />
+                <div>
+                  <h3 className="text-sm font-bold text-white">{t.settleModalTitle}</h3>
+                  <p className="text-[11px] text-emerald-100 font-medium">{settlingCourier.name}</p>
+                </div>
+              </div>
               <button
                 onClick={() => setSettlingCourier(null)}
-                className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-sm cursor-pointer"
+                className="text-white/80 hover:text-white text-base cursor-pointer transition"
               >
                 ✕
               </button>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">{t.courierName}</span>
-                <span className="font-bold text-slate-900 dark:text-white text-sm">{settlingCourier.name}</span>
+            <form onSubmit={handleSettlementSubmit} className="p-5 space-y-4">
+              {/* Row 1 — Orders today */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800">
+                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">{t.ordersCount}</p>
+                  <p className="text-2xl font-black text-slate-900 dark:text-white">{settleOrderCount}</p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800">
+                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">{t.deliveryFeesBreakdown}</p>
+                  <p className="text-sm text-slate-700 dark:text-slate-300 font-semibold">
+                    {settleOrderCount} × ₪100 = <span className="text-emerald-600 dark:text-emerald-400 font-black">₪{previewDeliveryFees.toLocaleString()}</span>
+                  </p>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">(Bat Yam adjusted on confirm)</p>
+                </div>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">{t.expectedCash}</span>
-                <span className="font-extrabold text-emerald-600 dark:text-emerald-400 text-base font-mono">
-                  ₪{expectedCash.toLocaleString()}
-                </span>
-              </div>
-            </div>
 
-            <form onSubmit={handleSettlementSubmit} className="space-y-4">
+              {/* Row 2 — Gross cash collected */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {t.actualCashReceived}
+                  {t.grossCollected}
+                  <span className="ml-1.5 text-slate-400 dark:text-slate-500 font-normal text-[10px]">({t.grossCollectedHint})</span>
                 </label>
                 <input
                   type="number"
                   step="any"
                   min="0"
                   required
-                  value={receivedCashInput}
-                  onChange={e => setReceivedCashInput(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-base font-bold font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  value={grossInput}
+                  onChange={e => setGrossInput(e.target.value)}
+                  placeholder="e.g. 1200"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-base font-bold font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                 />
               </div>
 
-              <div
-                className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center justify-between ${
-                  settlementDiff === 0
-                    ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-400'
-                    : settlementDiff < 0
-                    ? 'bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/30 text-rose-800 dark:text-rose-400'
-                    : 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-400'
-                }`}
-              >
-                <span>{t.difference}:</span>
-                <span className="font-mono text-sm font-bold">
-                  {settlementDiff === 0
-                    ? t.balanced
-                    : settlementDiff < 0
-                    ? `${t.shortage}: -₪${Math.abs(settlementDiff).toLocaleString()}`
-                    : `${t.overage}: +₪${settlementDiff.toLocaleString()}`}
-                </span>
-              </div>
-
+              {/* Row 3 — Manual bonus */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {t.notes}
+                  {t.bonusAmount}
+                  <span className="ml-1.5 text-slate-400 dark:text-slate-500 font-normal text-[10px]">({t.bonusHint})</span>
                 </label>
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={bonusInput}
+                  onChange={e => setBonusInput(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-base font-bold font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                />
+              </div>
+
+              {/* Computed Summary Panel */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <div className="bg-slate-50 dark:bg-slate-900/60 px-4 py-2.5 flex items-center justify-between border-b border-slate-200 dark:border-slate-700">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t.courierEarns}</span>
+                  <span className="text-base font-black text-emerald-600 dark:text-emerald-400 font-mono">₪{previewCourierPay.toLocaleString()}</span>
+                </div>
+                <div className={`px-4 py-3 flex items-center justify-between ${
+                  parsedGross > 0
+                    ? 'bg-amber-50 dark:bg-amber-500/10'
+                    : 'bg-slate-50 dark:bg-slate-900/40'
+                }`}>
+                  <div>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-300">{t.netToWarehouse}</p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500">{t.netToWarehouseHint}</p>
+                  </div>
+                  <span className={`text-xl font-black font-mono ${
+                    parsedGross > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'
+                  }`}>
+                    ₪{previewNet.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">{t.notes}</label>
                 <input
                   type="text"
                   value={settlementNotes}
                   onChange={e => setSettlementNotes(e.target.value)}
-                  placeholder="Optional closeout notes..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  placeholder="Optional shift notes..."
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+              {/* Telegram Notice */}
+              <div className="flex items-start gap-2 text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/40 rounded-xl px-3.5 py-2.5 border border-slate-100 dark:border-slate-800">
+                <span className="text-base leading-none mt-0.5">📲</span>
+                <span>Telegram receipts will be sent to the courier and the admin group automatically.</span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => setSettlingCourier(null)}
@@ -1208,10 +1254,17 @@ export default function GhostCrmDashboard() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmittingSettle}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-md shadow-emerald-200 dark:shadow-emerald-950 cursor-pointer"
+                  disabled={isSubmittingSettle || !grossInput}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-md shadow-emerald-200 dark:shadow-emerald-950 flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  {isSubmittingSettle ? 'Reconciling...' : t.confirmSettlement}
+                  {isSubmittingSettle ? (
+                    <>
+                      <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="32" strokeDashoffset="12"/></svg>
+                      Settling...
+                    </>
+                  ) : (
+                    <>{t.confirmSettlement}</>
+                  )}
                 </button>
               </div>
             </form>
@@ -2154,7 +2207,8 @@ export default function GhostCrmDashboard() {
             t={t}
             isRtl={isRtl}
             setSettlingCourier={setSettlingCourier}
-            setReceivedCashInput={setReceivedCashInput}
+            setGrossInput={setGrossInput}
+            setBonusInput={setBonusInput}
             onOpenAddCourier={() => {
               setEditingCourier(null)
               setShowCourierModal(true)

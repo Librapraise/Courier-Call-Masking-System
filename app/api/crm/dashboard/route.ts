@@ -20,8 +20,11 @@ export async function GET() {
       .eq('id', user.id)
       .single()
 
-    if (profile?.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden: Admin privileges required.' }, { status: 403 })
+    const isSuper = user.email === 'feelgee8@gmail.com' || user.user_metadata?.role === 'super_admin' || user.user_metadata?.is_super_admin === true
+    const allowedRoles = ['admin', 'super_admin']
+
+    if (!isSuper && (!profile?.role || !allowedRoles.includes(profile.role))) {
+      return NextResponse.json({ error: 'Forbidden: Admin or Super Admin privileges required.' }, { status: 403 })
     }
     // 1. Fetch Orders with Customer, Brand, and Courier relationships
     const { data: orders, error: ordersError } = await supabaseAdmin
@@ -35,6 +38,9 @@ export async function GET() {
         total_price,
         is_settled,
         order_date,
+        customer_id,
+        brand_id,
+        courier_id,
         crm_customers:customer_id (
           id,
           address_name,
@@ -194,7 +200,7 @@ export async function GET() {
     // Compute courier totals
     const courierSummaryMap: Record<string, { totalCash: number; count: number; settled: boolean }> = {}
     todayOrders.forEach(o => {
-      const cId = (o as any).crm_couriers?.id || 'unknown'
+      const cId = (o as any).crm_couriers?.id || (o as any).courier_id || 'unknown'
       if (!courierSummaryMap[cId]) {
         courierSummaryMap[cId] = { totalCash: 0, count: 0, settled: true }
       }
@@ -253,8 +259,10 @@ export async function POST(req: Request) {
       .eq('id', user.id)
       .single()
 
-    if (profile?.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden: Admin privileges required.' }, { status: 403 })
+    const isSuper = user.email === 'feelgee8@gmail.com' || user.user_metadata?.role === 'super_admin' || user.user_metadata?.is_super_admin === true
+    const allowedRoles = ['admin', 'super_admin', 'warehouseman']
+    if (!isSuper && (!profile?.role || !allowedRoles.includes(profile.role))) {
+      return NextResponse.json({ error: 'Forbidden: Admin, Super Admin, or Warehouseman privileges required.' }, { status: 403 })
     }
 
     const body = await req.json()
@@ -416,43 +424,155 @@ export async function POST(req: Request) {
     }
 
     if (action === 'SETTLE_COURIER') {
-      const { courierId, amountReceived, notes } = body
+      const { courierId, grossCollected, bonusAmount, notes } = body
       if (!courierId) {
         return NextResponse.json({ error: 'Missing courierId' }, { status: 400 })
       }
+      if (typeof grossCollected !== 'number' || grossCollected < 0) {
+        return NextResponse.json({ error: 'grossCollected must be a non-negative number' }, { status: 400 })
+      }
 
-      // Mark today's orders for this courier as settled
+      const bonus = Math.max(0, Number(bonusAmount) || 0)
+
+      // Fetch today's unsettled orders WITH city for fee-rate split
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       const todayIso = today.toISOString()
 
       const { data: ordersToSettle } = await supabaseAdmin
         .from('crm_orders')
-        .select('id, total_price')
+        .select('id, total_price, city')
         .eq('courier_id', courierId)
         .gte('order_date', todayIso)
         .eq('is_settled', false)
 
-      const totalExpected = (ordersToSettle || []).reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
+      const orders = ordersToSettle || []
 
+      // Bat Yam = ₪50/delivery, all others = ₪100/delivery
+      const BAT_YAM_FEE = 50
+      const STANDARD_FEE = 100
+      const BAT_YAM_CITY = 'בת ים'
+
+      let batYamCount = 0
+      let standardCount = 0
+      for (const o of orders) {
+        const city = (o.city || '').trim()
+        if (city === BAT_YAM_CITY) batYamCount++
+        else standardCount++
+      }
+
+      const deliveryFees = batYamCount * BAT_YAM_FEE + standardCount * STANDARD_FEE
+      const courierPay  = deliveryFees + bonus
+      const netToWarehouse = Math.max(0, grossCollected - courierPay)
+      const totalOrderValue = orders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
+
+      // Mark orders as settled
       await supabaseAdmin
         .from('crm_orders')
         .update({ is_settled: true })
         .eq('courier_id', courierId)
         .gte('order_date', todayIso)
+        .eq('is_settled', false)
 
-      // Record in cash_settlements
-      await supabaseAdmin
+      // Record the full financial breakdown in cash_settlements
+      const settlementNotes = notes || `סגירת קופה — ${orders.length} משלוחים | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse}`
+
+      const { error: insertV2Error } = await supabaseAdmin
         .from('cash_settlements')
         .insert({
-          courier_id: courierId,
-          total_collected: totalExpected,
-          amount_received: amountReceived ?? totalExpected,
-          status: 'SETTLED',
-          notes: notes || 'Settled via Persian Team Management Dashboard'
+          courier_id:      courierId,
+          total_collected: totalOrderValue,
+          gross_collected: grossCollected,
+          courier_pay:     courierPay,
+          bonus_amount:    bonus,
+          net_expected:    netToWarehouse,
+          amount_received: netToWarehouse,
+          status:          'SETTLED',
+          notes:           settlementNotes
         })
 
-      return NextResponse.json({ success: true, settledOrders: (ordersToSettle || []).length })
+      if (insertV2Error) {
+        // Graceful fallback for legacy table schema before migration_settlement_v2.sql is applied
+        console.warn('[CRM API] cash_settlements V2 columns not yet present, using base schema:', insertV2Error.message)
+        await supabaseAdmin
+          .from('cash_settlements')
+          .insert({
+            courier_id:      courierId,
+            total_collected: totalOrderValue,
+            amount_received: netToWarehouse,
+            status:          'SETTLED',
+            notes:           settlementNotes
+          })
+      }
+
+      // ── Fetch courier details for Telegram ──────────────────────────────────
+      const { data: courierRow } = await supabaseAdmin
+        .from('crm_couriers')
+        .select('name, telegram_id')
+        .eq('id', courierId)
+        .single()
+
+      const courierName    = courierRow?.name || 'שליח'
+      const courierTgId    = courierRow?.telegram_id
+      const botToken       = process.env.TELEGRAM_BOT_TOKEN || ''
+      const adminIdsEnv    = process.env.ALLOWED_TELEGRAM_ADMIN_IDS || ''
+      const adminIds       = adminIdsEnv.split(',').map(s => s.trim()).filter(Boolean)
+
+      // ── Message to COURIER ──────────────────────────────────────────────────
+      const courierMsg =
+        `💵 *סגירת משמרת — ${courierName}*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📦 *משלוחים שבוצעו:* ${orders.length}\n` +
+        (standardCount > 0 ? `  • ${standardCount} משלוחים רגילים × ₪${STANDARD_FEE} = ₪${standardCount * STANDARD_FEE}\n` : '') +
+        (batYamCount   > 0 ? `  • ${batYamCount} משלוחי בת ים × ₪${BAT_YAM_FEE} = ₪${batYamCount * BAT_YAM_FEE}\n` : '') +
+        (bonus         > 0 ? `  • 🎁 בונוס: ₪${bonus}\n` : '') +
+        `\n💰 *גבית מלקוחות:* ₪${grossCollected.toLocaleString()}\n` +
+        `📊 *עמלתך למשמרת:* ₪${courierPay.toLocaleString()}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `💳 *עליך להעביר למחסנאי: ₪${netToWarehouse.toLocaleString()}*`
+
+      if (courierTgId && botToken) {
+        await sendTelegramMessage(botToken, {
+          chat_id:    courierTgId,
+          text:       courierMsg,
+          parse_mode: 'Markdown'
+        })
+      }
+
+      // ── Message to WAREHOUSEMAN / ADMINS ────────────────────────────────────
+      const adminMsg =
+        `🧾 *התחשבנות שליח — ${courierName}*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📦 *משלוחים:* ${orders.length}\n` +
+        (standardCount > 0 ? `  • ${standardCount} רגילים × ₪${STANDARD_FEE} = ₪${standardCount * STANDARD_FEE}\n` : '') +
+        (batYamCount   > 0 ? `  • ${batYamCount} בת ים × ₪${BAT_YAM_FEE} = ₪${batYamCount * BAT_YAM_FEE}\n` : '') +
+        (bonus         > 0 ? `  • 🎁 בונוס: ₪${bonus}\n` : '') +
+        `\n💰 *גבה מלקוחות:* ₪${grossCollected.toLocaleString()}\n` +
+        `📊 *עמלת שליח:* ₪${courierPay.toLocaleString()}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `💳 *גבה מ${courierName}: ₪${netToWarehouse.toLocaleString()}*`
+
+      if (botToken) {
+        for (const adminId of adminIds) {
+          await sendTelegramMessage(botToken, {
+            chat_id:    adminId,
+            text:       adminMsg,
+            parse_mode: 'Markdown'
+          }).catch(() => {/* non-fatal */})
+        }
+      }
+
+      return NextResponse.json({
+        success:          true,
+        settledOrders:    orders.length,
+        grossCollected,
+        courierPay,
+        bonus,
+        netToWarehouse,
+        batYamCount,
+        standardCount,
+        deliveryFees
+      })
     }
 
     if (action === 'PURGE_DEMO_DATA') {

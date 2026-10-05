@@ -1178,7 +1178,8 @@ export function SettlementsRouteView({
   t,
   isRtl,
   setSettlingCourier,
-  setReceivedCashInput,
+  setGrossInput,
+  setBonusInput,
   onOpenAddCourier,
   onOpenEditCourier,
   onOpenDeleteCourier
@@ -1188,7 +1189,8 @@ export function SettlementsRouteView({
   t: any
   isRtl: boolean
   setSettlingCourier: (c: Courier) => void
-  setReceivedCashInput: (v: string) => void
+  setGrossInput?: (v: string) => void
+  setBonusInput?: (v: string) => void
   onOpenAddCourier?: () => void
   onOpenEditCourier?: (c: Courier) => void
   onOpenDeleteCourier?: (c: Courier) => void
@@ -1288,7 +1290,8 @@ export function SettlementsRouteView({
                 <button
                   onClick={() => {
                     setSettlingCourier(courier)
-                    setReceivedCashInput((courier.todayCash || 0).toString())
+                    if (setGrossInput) setGrossInput((courier.todayCash || 0).toString())
+                    if (setBonusInput) setBonusInput('0')
                   }}
                   className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition cursor-pointer text-center"
                 >
@@ -1371,7 +1374,8 @@ export function SettlementsRouteView({
                               type="button"
                               onClick={() => {
                                 setSettlingCourier(courier)
-                                setReceivedCashInput((courier.todayCash || 0).toString())
+                                if (setGrossInput) setGrossInput((courier.todayCash || 0).toString())
+                                if (setBonusInput) setBonusInput('0')
                               }}
                               className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition cursor-pointer"
                             >

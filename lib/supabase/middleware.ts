@@ -56,13 +56,16 @@ export async function updateSession(request: NextRequest) {
         .eq('id', user.id)
         .single()
 
-      if (profile?.role === 'admin') {
+      const isSuperAdmin = user.email === 'feelgee8@gmail.com' || (user.user_metadata?.role === 'super_admin') || (user.user_metadata?.is_super_admin === true)
+      const allowedRoles = ['admin', 'super_admin']
+
+      if (profile?.role === 'admin' || profile?.role === 'super_admin' || isSuperAdmin) {
         return NextResponse.redirect(new URL('/crm', request.url))
       }
       return NextResponse.redirect(new URL('/courier', request.url))
     }
 
-    // Strict OPSEC: Only 'admin' role can access /crm or /admin
+    // Strict OPSEC: Only 'admin' or 'super_admin' role can access /crm or /admin
     if (isCrmRoute || isAdminRoute) {
       const { data: profile } = await supabase
         .from('profiles')
@@ -70,7 +73,10 @@ export async function updateSession(request: NextRequest) {
         .eq('id', user.id)
         .single()
 
-      if (profile?.role !== 'admin') {
+      const isSuperAdmin = user.email === 'feelgee8@gmail.com' || (user.user_metadata?.role === 'super_admin') || (user.user_metadata?.is_super_admin === true)
+      const allowedRoles = ['admin', 'super_admin']
+
+      if (!isSuperAdmin && (!profile?.role || !allowedRoles.includes(profile.role))) {
         console.warn(`[OPSEC] Unauthorized user ${user.id} (${user.email}) attempted to access ${pathname}`)
         // Couriers or non-admins are restricted to /courier
         return NextResponse.redirect(new URL('/courier', request.url))
