@@ -21,10 +21,11 @@ export async function GET() {
       .single()
 
     const isSuper = user.email === 'feelgee8@gmail.com' || user.user_metadata?.role === 'super_admin' || user.user_metadata?.is_super_admin === true
-    const allowedRoles = ['admin', 'super_admin']
+    const allowedRoles = ['admin', 'super_admin', 'warehouseman']
+    const userRole = profile?.role || user.user_metadata?.role
 
-    if (!isSuper && (!profile?.role || !allowedRoles.includes(profile.role))) {
-      return NextResponse.json({ error: 'Forbidden: Admin or Super Admin privileges required.' }, { status: 403 })
+    if (!isSuper && (!userRole || !allowedRoles.includes(userRole))) {
+      return NextResponse.json({ error: 'Forbidden: Admin, Super Admin, or Warehouseman privileges required.' }, { status: 403 })
     }
     // 1. Fetch Orders with Customer, Brand, and Courier relationships
     const { data: orders, error: ordersError } = await supabaseAdmin

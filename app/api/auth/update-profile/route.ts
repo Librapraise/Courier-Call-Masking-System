@@ -29,7 +29,14 @@ export async function GET() {
     const telegramId = meta.telegram_id || ''
 
     const isSuperAdmin = user.email === 'feelgee8@gmail.com' || meta.role === 'super_admin' || meta.is_super_admin === true
-    const roleTitle = isSuperAdmin ? 'Super Admin' : (profile?.role === 'admin' ? 'Dispatcher' : 'Courier')
+    const userRole = profile?.role || meta.role
+    const roleTitle = isSuperAdmin
+      ? 'Super Admin'
+      : userRole === 'warehouseman'
+      ? 'Warehouse Manager'
+      : userRole === 'admin'
+      ? 'Dispatcher'
+      : 'Courier Driver'
 
     return NextResponse.json({
       ok: true,

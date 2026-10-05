@@ -110,7 +110,7 @@ export function CrmSettingsView({
   const [inviteEmail, setInviteEmail] = useState('')
   const [invitePhone, setInvitePhone] = useState('')
   const [inviteTelegramId, setInviteTelegramId] = useState('')
-  const [inviteRole, setInviteRole] = useState<'super_admin' | 'admin' | 'courier'>('admin')
+  const [inviteRole, setInviteRole] = useState<'super_admin' | 'admin' | 'warehouseman' | 'courier'>('admin')
   const [invitePassword, setInvitePassword] = useState('')
   const [isSubmittingInvite, setIsSubmittingInvite] = useState(false)
   const [inviteError, setInviteError] = useState<string | null>(null)
@@ -206,7 +206,14 @@ export function CrmSettingsView({
       setInviteSuccessCard({
         name: inviteName.trim(),
         email: inviteEmail.trim(),
-        role: inviteRole === 'super_admin' ? 'Super Admin' : inviteRole === 'admin' ? 'Dispatcher (Admin)' : 'Courier Driver',
+        role:
+          inviteRole === 'super_admin'
+            ? 'Super Admin'
+            : inviteRole === 'warehouseman'
+            ? 'Warehouse Manager'
+            : inviteRole === 'admin'
+            ? 'Dispatcher (Admin)'
+            : 'Courier Driver',
         password: invitePassword.trim(),
         loginUrl: `${origin}/login`
       })
@@ -1172,6 +1179,7 @@ export function CrmSettingsView({
                           >
                             <option value="super_admin">👑 Super Admin</option>
                             <option value="admin">🛡️ Dispatcher</option>
+                            <option value="warehouseman">📦 Warehouse Manager</option>
                             <option value="courier">🛵 Courier Driver</option>
                           </select>
                         ) : (
@@ -1181,6 +1189,8 @@ export function CrmSettingsView({
                                 ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'
                                 : member.raw_role === 'admin'
                                 ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                                : member.raw_role === 'warehouseman'
+                                ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
                                 : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
                             }`}
                           >
@@ -1501,6 +1511,9 @@ export function CrmSettingsView({
                       )}
                       <option value="admin">
                         🛡️ {lang === 'he' ? 'סדרן / מנהל (ניהול הזמנות, קטלוג, מלאי וקופות)' : 'Dispatcher / Admin (Orders, Inventory & Settlements)'}
+                      </option>
+                      <option value="warehouseman">
+                        📦 {lang === 'he' ? 'מנהל מחסן / מלאי (ניהול מלאי, קטלוג וגישה למערכת)' : 'Warehouseman / Store Manager (Inventory, Catalog & CRM Access)'}
                       </option>
                       <option value="courier">
                         🛵 {lang === 'he' ? 'שליח שטח (גישה לאפליקציית שליח בלבד)' : 'Courier Driver (Delivery App Only)'}

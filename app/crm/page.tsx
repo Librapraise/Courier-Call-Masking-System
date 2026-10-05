@@ -340,15 +340,22 @@ export default function GhostCrmDashboard() {
           .single()
 
         const isSuper = activeUser.email === 'feelgee8@gmail.com' || activeUser.user_metadata?.role === 'super_admin' || activeUser.user_metadata?.is_super_admin === true
-        const allowedRoles = ['admin', 'super_admin']
+        const allowedRoles = ['admin', 'super_admin', 'warehouseman']
+        const userRole = profile?.role || activeUser.user_metadata?.role
 
-        if (!isSuper && (profileError || !profile?.role || !allowedRoles.includes(profile.role))) {
+        if (!isSuper && (profileError || !userRole || !allowedRoles.includes(userRole))) {
           console.warn('[GhostCRM Auth Guard] Unauthorized user attempted to access /crm. Redirecting to courier portal.')
           window.location.href = '/courier'
           return
         }
 
-        const roleName = isSuper || profile?.role === 'super_admin' ? 'Super Admin' : 'System Admin'
+        const roleName = isSuper || profile?.role === 'super_admin'
+          ? 'Super Admin'
+          : profile?.role === 'warehouseman' || activeUser.user_metadata?.role === 'warehouseman'
+          ? 'Warehouse Manager'
+          : profile?.role === 'admin'
+          ? 'Dispatcher'
+          : 'System Admin'
         const meta = activeUser.user_metadata || {}
         const displayName =
           meta.full_name || meta.name || (activeUser.email ? activeUser.email.split('@')[0] : 'Admin')

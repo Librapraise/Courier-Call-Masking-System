@@ -32,7 +32,7 @@ export async function GET() {
       .eq('id', user.id)
       .single()
 
-    if (profile?.role !== 'admin' && !checkIsSuperAdmin(user)) {
+    if (profile?.role !== 'admin' && profile?.role !== 'warehouseman' && !checkIsSuperAdmin(user)) {
       return NextResponse.json(
         { error: 'Forbidden: Admin access required.' },
         { status: 403 }
@@ -76,12 +76,15 @@ export async function GET() {
         return cleanPhone && cClean && (cleanPhone.endsWith(cClean.slice(-9)) || cClean.endsWith(cleanPhone.slice(-9)))
       })
 
-      let rawRole: 'super_admin' | 'admin' | 'courier' = 'courier'
+      let rawRole: 'super_admin' | 'admin' | 'warehouseman' | 'courier' = 'courier'
       let displayRole = 'Courier Driver'
 
       if (isSuper) {
         rawRole = 'super_admin'
         displayRole = 'Super Admin'
+      } else if (p?.role === 'warehouseman' || meta.role === 'warehouseman') {
+        rawRole = 'warehouseman'
+        displayRole = 'Warehouse Manager'
       } else if (p?.role === 'admin' || meta.role === 'admin') {
         rawRole = 'admin'
         displayRole = 'Dispatcher'
@@ -115,14 +118,16 @@ export async function GET() {
       }
     })
 
-    // Sort: Root Super Admin first, then other super admins, then dispatchers, then couriers
+    // Sort: Root Super Admin first, then other super admins, then dispatchers, then warehouse managers, then couriers
     teamMembers.sort((a, b) => {
       if (a.is_root_super_admin) return -1
       if (b.is_root_super_admin) return 1
       if (a.raw_role === 'super_admin' && b.raw_role !== 'super_admin') return -1
       if (b.raw_role === 'super_admin' && a.raw_role !== 'super_admin') return 1
-      if (a.raw_role === 'admin' && b.raw_role === 'courier') return -1
-      if (b.raw_role === 'admin' && a.raw_role === 'courier') return 1
+      if (a.raw_role === 'admin' && (b.raw_role === 'warehouseman' || b.raw_role === 'courier')) return -1
+      if (b.raw_role === 'admin' && (a.raw_role === 'warehouseman' || a.raw_role === 'courier')) return 1
+      if (a.raw_role === 'warehouseman' && b.raw_role === 'courier') return -1
+      if (b.raw_role === 'warehouseman' && a.raw_role === 'courier') return 1
       return (a.name || '').localeCompare(b.name || '')
     })
 
@@ -163,7 +168,7 @@ export async function POST(req: Request) {
 
     const isCallerSuperAdmin = checkIsSuperAdmin(user)
 
-    if (profile?.role !== 'admin' && !isCallerSuperAdmin) {
+    if (profile?.role !== 'admin' && profile?.role !== 'warehouseman' && !isCallerSuperAdmin) {
       return NextResponse.json(
         { error: 'Forbidden: Admin access required.' },
         { status: 403 }
@@ -189,8 +194,14 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'Password must be at least 6 characters.' }, { status: 400 })
       }
 
-      const targetRole: 'super_admin' | 'admin' | 'courier' =
-        role === 'super_admin' ? 'super_admin' : role === 'courier' ? 'courier' : 'admin'
+      const targetRole: 'super_admin' | 'admin' | 'warehouseman' | 'courier' =
+        role === 'super_admin'
+          ? 'super_admin'
+          : role === 'warehouseman'
+          ? 'warehouseman'
+          : role === 'courier'
+          ? 'courier'
+          : 'admin'
 
       // Only Super Admins can create other Super Admins
       if (targetRole === 'super_admin' && !isCallerSuperAdmin) {
@@ -226,14 +237,24 @@ export async function POST(req: Request) {
 
       const newUserId = created.user.id
 
-      // Upsert profile record (profiles table check constraint allows: 'admin' | 'courier')
-      const dbRole = targetRole === 'courier' ? 'courier' : 'admin'
-      await supabaseAdmin.from('profiles').upsert({
+      // Upsert profile record (profiles table check constraint allows: 'admin' | 'courier' | 'warehouseman')
+      const dbRole = targetRole === 'courier' ? 'courier' : targetRole === 'warehouseman' ? 'warehouseman' : 'admin'
+      const { error: profileUpsertErr } = await supabaseAdmin.from('profiles').upsert({
         id: newUserId,
         email: email.trim(),
         role: dbRole,
         phone_number: formattedPhone
       })
+
+      // Graceful fallback if database constraint hasn't been migrated yet
+      if (profileUpsertErr && dbRole === 'warehouseman') {
+        await supabaseAdmin.from('profiles').upsert({
+          id: newUserId,
+          email: email.trim(),
+          role: 'admin',
+          phone_number: formattedPhone
+        })
+      }
 
       // If courier, also register into crm_couriers roster
       if (targetRole === 'courier') {
@@ -298,10 +319,16 @@ export async function POST(req: Request) {
         )
       }
 
-      const roleKey: 'super_admin' | 'admin' | 'courier' =
-        newRole === 'super_admin' ? 'super_admin' : newRole === 'courier' ? 'courier' : 'admin'
+      const roleKey: 'super_admin' | 'admin' | 'warehouseman' | 'courier' =
+        newRole === 'super_admin'
+          ? 'super_admin'
+          : newRole === 'warehouseman'
+          ? 'warehouseman'
+          : newRole === 'courier'
+          ? 'courier'
+          : 'admin'
 
-      const dbRole = roleKey === 'courier' ? 'courier' : 'admin'
+      const dbRole = roleKey === 'courier' ? 'courier' : roleKey === 'warehouseman' ? 'warehouseman' : 'admin'
 
       // 1. Update user_metadata in auth.users
       await supabaseAdmin.auth.admin.updateUserById(memberId, {
@@ -312,11 +339,18 @@ export async function POST(req: Request) {
         }
       })
 
-      // 2. Update profiles table
-      await supabaseAdmin
+      // 2. Update profiles table with fallback
+      const { error: profileUpdateErr } = await supabaseAdmin
         .from('profiles')
         .update({ role: dbRole })
         .eq('id', memberId)
+
+      if (profileUpdateErr && dbRole === 'warehouseman') {
+        await supabaseAdmin
+          .from('profiles')
+          .update({ role: 'admin' })
+          .eq('id', memberId)
+      }
 
       // 3. If promoted to courier, ensure in crm_couriers roster
       if (roleKey === 'courier') {
