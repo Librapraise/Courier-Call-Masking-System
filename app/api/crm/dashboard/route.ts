@@ -271,6 +271,13 @@ export async function GET() {
       }
     })
 
+    // Recent cash settlements (for live warehouse collection feed & alerts)
+    const { data: recentSettlements } = await supabaseAdmin
+      .from('cash_settlements')
+      .select('id, courier_id, settlement_date, gross_collected, courier_pay, bonus_amount, net_expected, amount_received, status, notes, created_at, crm_couriers(name, phone_number, telegram_id)')
+      .order('created_at', { ascending: false })
+      .limit(15)
+
     return NextResponse.json({
       metrics: {
         courierCashToday,
@@ -285,7 +292,8 @@ export async function GET() {
       products: products || [],
       couriers,
       customers: customersData || [],
-      cityCounts
+      cityCounts,
+      recentSettlements: recentSettlements || []
     })
   } catch (err: any) {
     console.error('[CRM API] Unexpected error in GET:', err)
@@ -588,6 +596,63 @@ export async function POST(req: Request) {
       const adminIdsEnv    = process.env.ALLOWED_TELEGRAM_ADMIN_IDS || ''
       const adminIds       = adminIdsEnv.split(',').map(s => s.trim()).filter(Boolean)
 
+      // ── Resolve Warehouse Workers (Storekeepers) Dynamically from Database ──
+      const warehouseTelegramIds = new Set<string>()
+
+      try {
+        // 1. Check env-configured warehouse IDs if specified
+        const warehouseEnv = (process.env.WAREHOUSE_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
+        warehouseEnv.forEach(id => warehouseTelegramIds.add(id))
+
+        // 2. Fetch profiles with role 'warehouseman'
+        const { data: warehouseProfiles } = await supabaseAdmin
+          .from('profiles')
+          .select('id, phone_number, role')
+          .eq('role', 'warehouseman')
+
+        // 3. Fetch crm_couriers roster to match phone numbers with registered telegram_ids (e.g. soso)
+        const { data: crmRoster } = await supabaseAdmin
+          .from('crm_couriers')
+          .select('phone_number, telegram_id, name')
+
+        // 4. Fetch Supabase Auth users to check user_metadata.telegram_id
+        const { data: authUsersList } = await supabaseAdmin.auth.admin.listUsers()
+
+        for (const u of authUsersList?.users || []) {
+          const metaRole = u.user_metadata?.role
+          const metaTg = u.user_metadata?.telegram_id
+          if (metaRole === 'warehouseman' && metaTg) {
+            warehouseTelegramIds.add(String(metaTg).trim())
+          }
+        }
+
+        // Match warehouse profile phones with crm_couriers roster
+        for (const wp of warehouseProfiles || []) {
+          const cleanPhone = (wp.phone_number || '').replace(/\D/g, '')
+          if (cleanPhone) {
+            const matched = (crmRoster || []).find(r => {
+              const rClean = (r.phone_number || '').replace(/\D/g, '')
+              return rClean && (cleanPhone.endsWith(rClean.slice(-9)) || rClean.endsWith(cleanPhone.slice(-9)))
+            })
+            if (matched?.telegram_id) {
+              warehouseTelegramIds.add(String(matched.telegram_id).trim())
+            }
+          }
+        }
+
+        // Also match known warehouse names (e.g., soso / מחסנאי)
+        for (const r of crmRoster || []) {
+          const lowerName = (r.name || '').toLowerCase()
+          if (lowerName.includes('soso') || lowerName.includes('מחסנאי') || lowerName.includes('warehouse')) {
+            if (r.telegram_id) {
+              warehouseTelegramIds.add(String(r.telegram_id).trim())
+            }
+          }
+        }
+      } catch (lookupErr) {
+        console.warn('[CRM API] Error querying warehouse workers for Telegram receipt:', lookupErr)
+      }
+
       // ── Message to COURIER ──────────────────────────────────────────────────
       const courierMsg =
         `💵 *סגירת משמרת — ${courierName}*${isAdditionalRun ? ` *(סבב נוסף)*` : ''}\n` +
@@ -610,40 +675,56 @@ export async function POST(req: Request) {
         })
       }
 
-      // ── Message to WAREHOUSEMAN / ADMINS ────────────────────────────────────
-      const adminMsg =
-        `🧾 *התחשבנות שליח — ${courierName}*${isAdditionalRun ? ` *(סבב נוסף)*` : ''}\n` +
-        `━━━━━━━━━━━━━━━━━━━━━\n` +
-        (isAdditionalRun ? `ℹ️ _סבב סגירה נוסף להיום (${earlierCount} משלוחים נסגרו והועברו מוקדם יותר)_\n` : '') +
-        `📦 *משלוחים בסבב זה:* ${orders.length}\n` +
-        (standardCount > 0 ? `  • ${standardCount} רגילים × ₪${STANDARD_FEE} = ₪${standardCount * STANDARD_FEE}\n` : '') +
-        (batYamCount   > 0 ? `  • ${batYamCount} בת ים × ₪${BAT_YAM_FEE} = ₪${batYamCount * BAT_YAM_FEE}\n` : '') +
-        (bonus         > 0 ? `  • 🎁 בונוס: ₪${bonus}\n` : '') +
-        `\n💰 *גבה מלקוחות בסבב זה:* ₪${grossCollected.toLocaleString()}\n` +
-        `📊 *עמלת שליח בסבב זה:* ₪${courierPay.toLocaleString()}\n` +
-        `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `💳 *גבה מ${courierName}: ₪${netToWarehouse.toLocaleString()}*`
+      // ── Message to WAREHOUSEMAN / STOREKEEPER (Actionable Collection Alert) ──
+      const warehouseMsg =
+        `🔔 *התראה למחסנאי — דרישת גביית מזומן משליח!*${isAdditionalRun ? ` *(סבב נוסף)*` : ''}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🛵 *שליח:* *${courierName}*\n` +
+        `📦 *משלוחים שחולקו בסבב זה:* ${orders.length}\n` +
+        `💰 *סך שנגבה מלקוחות בסבב זה:* ₪${grossCollected.toLocaleString()}\n` +
+        `📊 *עמלת השליח שנוכתה:* ₪${courierPay.toLocaleString()}` + (bonus > 0 ? ` (כולל בונוס ₪${bonus})` : '') + `\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `💵 *עליך לגבות כעת מ${courierName}: ₪${netToWarehouse.toLocaleString()} במזומן!*` +
+        (isAdditionalRun ? `\n\nℹ️ _הערה: ${earlierCount} משלוחים קודמים (₪${earlierSettledTotal}) כבר הועברו מוקדם יותר היום._` : '')
 
+      // ── Message to WAREHOUSE WORKERS ONLY (Storekeeper Physical Collection) ─
+      // NOTE: The accountant / dispatchers must NOT receive this collection message.
+      // Only the warehouse worker physically collects cash envelopes from couriers.
+      let warehouseNotifiedCount = 0
       if (botToken) {
-        for (const adminId of adminIds) {
-          await sendTelegramMessage(botToken, {
-            chat_id:    adminId,
-            text:       adminMsg,
-            parse_mode: 'Markdown'
-          }).catch(() => {/* non-fatal */})
+        if (warehouseTelegramIds.size === 0) {
+          console.warn('[CRM API] Warning: No warehouse worker configured with a Telegram ID to receive cash collection alert.')
+        } else {
+          for (const whId of warehouseTelegramIds) {
+            try {
+              const ok = await sendTelegramMessage(botToken, {
+                chat_id:    whId,
+                text:       warehouseMsg,
+                parse_mode: 'Markdown'
+              })
+              if (ok) {
+                warehouseNotifiedCount++
+                console.log(`[CRM API] Successfully sent collection alert to warehouse worker ID: ${whId}`)
+              }
+            } catch (whErr) {
+              console.warn(`[CRM API] Non-fatal error sending collection alert to warehouse worker ID ${whId}:`, whErr)
+            }
+          }
         }
       }
 
       return NextResponse.json({
-        success:          true,
-        settledOrders:    orders.length,
+        success:                true,
+        settledOrders:          orders.length,
         grossCollected,
         courierPay,
         bonus,
         netToWarehouse,
         batYamCount,
         standardCount,
-        deliveryFees
+        deliveryFees,
+        warehouseNotifiedCount,
+        warehouseRecipients:    Array.from(warehouseTelegramIds)
       })
     }
 

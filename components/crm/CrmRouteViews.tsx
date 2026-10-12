@@ -1180,6 +1180,26 @@ export function InventoryRouteView({
 /* ======================================================== */
 /* 4. ROUTE: COURIER CASH SETTLEMENTS CONSOLE               */
 /* ======================================================== */
+export interface CashSettlementRecord {
+  id: string
+  courier_id: string
+  settlement_date: string
+  gross_collected: number
+  total_collected?: number
+  courier_pay: number
+  bonus_amount: number
+  net_expected: number
+  amount_received: number
+  status: string
+  notes?: string
+  created_at: string
+  crm_couriers?: {
+    name: string
+    phone_number?: string
+    telegram_id?: number | string | null
+  }
+}
+
 export function SettlementsRouteView({
   couriers,
   metrics,
@@ -1190,7 +1210,8 @@ export function SettlementsRouteView({
   setBonusInput,
   onOpenAddCourier,
   onOpenEditCourier,
-  onOpenDeleteCourier
+  onOpenDeleteCourier,
+  recentSettlements
 }: {
   couriers: Courier[]
   metrics: DashboardMetrics
@@ -1202,6 +1223,7 @@ export function SettlementsRouteView({
   onOpenAddCourier?: () => void
   onOpenEditCourier?: (c: Courier) => void
   onOpenDeleteCourier?: (c: Courier) => void
+  recentSettlements?: CashSettlementRecord[]
 }) {
   return (
     <div className="space-y-6">
@@ -1455,6 +1477,76 @@ export function SettlementsRouteView({
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Cash Handover Ledger & Storekeeper Verification Feed */}
+      <div className="rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden space-y-3 p-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <WalletIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+              {isRtl ? 'יומן העברות כספים ואישורי מחסנאי' : 'Storekeeper Cash Collection Ledger'}
+            </h3>
+          </div>
+          <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+            {recentSettlements && recentSettlements.length > 0
+              ? `${recentSettlements.length} recent closeout receipts logged`
+              : 'No shift settlements recorded yet'}
+          </span>
+        </div>
+
+        {recentSettlements && recentSettlements.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse" dir={isRtl ? 'rtl' : 'ltr'}>
+              <thead>
+                <tr className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-100 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  <th className="py-3 px-3">זמן / Time</th>
+                  <th className="py-3 px-3">שליח / Courier</th>
+                  <th className="py-3 px-3">סך שנגבה / Collected</th>
+                  <th className="py-3 px-3">עמלת שליח / Courier Fee</th>
+                  <th className="py-3 px-3">נטו למחסנאי / Net to Safe</th>
+                  <th className="py-3 px-4">פירוט סבב / Shift Breakdown</th>
+                  <th className="py-3 px-3 text-center">סטטוס / Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-xs">
+                {recentSettlements.map(item => (
+                  <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                    <td className="py-3 px-3 font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                      {new Date(item.created_at).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </td>
+                    <td className="py-3 px-3 font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                      {item.crm_couriers?.name || 'שליח'}
+                    </td>
+                    <td className="py-3 px-3 font-mono font-bold text-slate-700 dark:text-slate-300">
+                      ₪{Number(item.gross_collected || item.total_collected || 0).toLocaleString()}
+                    </td>
+                    <td className="py-3 px-3 font-mono text-amber-600 dark:text-amber-400 font-bold">
+                      -₪{Number(item.courier_pay || 0).toLocaleString()}
+                    </td>
+                    <td className="py-3 px-3 font-mono font-extrabold text-sm text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                      ₪{Number(item.net_expected || item.amount_received || 0).toLocaleString()}
+                    </td>
+                    <td className="py-3 px-4 text-[11px] text-slate-500 dark:text-slate-400 max-w-xs truncate" title={item.notes || ''}>
+                      {item.notes || 'סגירת קופה'}
+                    </td>
+                    <td className="py-3 px-3 text-center whitespace-nowrap">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30">
+                        {isRtl ? '✓ הופקד בכספת' : '✓ Received in Safe'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="py-6 text-center text-xs text-slate-400 dark:text-slate-500">
+            {isRtl
+              ? 'טרם בוצעו סגירות קופה היום. כאשר מנהל/סדרן סוגר קופה לשליח, ההתראה תופיע כאן וכל פרטי הגבייה יישמרו ביומן זה.'
+              : 'No shifts closed out yet today. When a shift is closed, storekeeper collection notices and handover receipts will record here.'}
+          </div>
+        )}
       </div>
     </div>
   )

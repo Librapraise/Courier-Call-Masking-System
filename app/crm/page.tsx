@@ -48,7 +48,8 @@ import {
   InventoryRouteView,
   SettlementsRouteView,
   CustomersRouteView,
-  TelegramRouteView
+  TelegramRouteView,
+  CashSettlementRecord
 } from '@/components/crm/CrmRouteViews'
 import { CrmSettingsView } from '@/components/crm/CrmSettingsView'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -254,6 +255,8 @@ export default function GhostCrmDashboard() {
     `מרקו לויז - הנשיאים 57 פתח תקווה\n054-9876543\n@marko_tlv\nמותג: רפואי לחיים\nפריטים: גלקסי 10 גרם / 10 גרם רפואי גלקסי\nמחיר: 450₪`
   )
   const [parsedTestResult, setParsedTestResult] = useState<ParsedDeliveryOrder | null>(null)
+  const [recentSettlements, setRecentSettlements] = useState<CashSettlementRecord[]>([])
+  const [dismissedSettlementIds, setDismissedSettlementIds] = useState<string[]>([])
 
   // Translations
   const t = useMemo(() => TRANSLATIONS[lang], [lang])
@@ -519,6 +522,9 @@ export default function GhostCrmDashboard() {
       if (data.metrics) {
         setMetrics(data.metrics)
       }
+      if (data.recentSettlements) {
+        setRecentSettlements(data.recentSettlements)
+      }
     } catch (err) {
       console.error('[GhostCRM] Fetch error:', err)
     } finally {
@@ -563,6 +569,20 @@ export default function GhostCrmDashboard() {
   const togglePhoneMask = (id: string) => {
     setUnmaskedPhones(prev => ({ ...prev, [id]: !prev[id] }))
   }
+
+  // Real-time Storekeeper Cash Collection Alert
+  const latestWarehouseSettlement = useMemo(() => {
+    if (!recentSettlements || recentSettlements.length === 0) return null
+    const todayIsoDate = new Date().toISOString().split('T')[0]
+    return (
+      recentSettlements.find(s => {
+        if (dismissedSettlementIds.includes(s.id)) return false
+        const isToday = s.settlement_date === todayIsoDate || (s.created_at && s.created_at.startsWith(todayIsoDate))
+        const hasNetCash = Number(s.net_expected || s.amount_received || 0) > 0
+        return isToday && hasNetCash
+      }) || null
+    )
+  }, [recentSettlements, dismissedSettlementIds])
 
   // Brand Order Counts
   const brandOrderCounts = useMemo(() => {
@@ -2172,6 +2192,79 @@ export default function GhostCrmDashboard() {
           </div>
         </header>
 
+        {/* WAREHOUSE WORKER CASH COLLECTION NOTIFICATION BANNER */}
+        {latestWarehouseSettlement && (
+          <div
+            className="rounded-2xl p-4 sm:p-5 bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-indigo-500/15 border-2 border-emerald-500/40 dark:border-emerald-500/50 shadow-lg shadow-emerald-500/5 backdrop-blur-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all animate-in fade-in slide-in-from-top-2 duration-300"
+            dir={isRtl ? 'rtl' : 'ltr'}
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="p-3 rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-600/30 shrink-0">
+                <WalletIcon className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 text-[10px] font-black uppercase tracking-wider border border-emerald-300 dark:border-emerald-700">
+                    {isRtl ? '🔔 התראה למחסנאי — דרישת גביית מזומן!' : '🔔 Storekeeper Cash Handover Alert'}
+                  </span>
+                  <span className="text-[11px] text-slate-400 dark:text-slate-500 font-mono">
+                    {new Date(latestWarehouseSettlement.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white leading-tight">
+                  {isRtl ? (
+                    <>
+                      עליך לגבות כעת מהשליח{' '}
+                      <span className="text-emerald-600 dark:text-emerald-400 font-black underline decoration-emerald-500/50 underline-offset-4">
+                        {latestWarehouseSettlement.crm_couriers?.name || 'שליח'}
+                      </span>{' '}
+                      סך של{' '}
+                      <span className="font-mono text-xl text-emerald-600 dark:text-emerald-400 font-black">
+                        ₪{Number(latestWarehouseSettlement.net_expected || latestWarehouseSettlement.amount_received || 0).toLocaleString()}
+                      </span>{' '}
+                      במזומן!
+                    </>
+                  ) : (
+                    <>
+                      Collect{' '}
+                      <span className="font-mono text-xl text-emerald-600 dark:text-emerald-400 font-black">
+                        ₪{Number(latestWarehouseSettlement.net_expected || latestWarehouseSettlement.amount_received || 0).toLocaleString()}
+                      </span>{' '}
+                      in physical cash from courier{' '}
+                      <span className="text-emerald-600 dark:text-emerald-400 font-black underline decoration-emerald-500/50 underline-offset-4">
+                        {latestWarehouseSettlement.crm_couriers?.name || 'Courier'}
+                      </span>{' '}
+                      now!
+                    </>
+                  )}
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-300 font-medium">
+                  {latestWarehouseSettlement.notes || (isRtl ? 'סגירת סבב הושלמה במערכת. יש לקבל את מעטפת המזומן מהשליח ולהפקידה בכספת.' : 'Shift closeout completed. Collect envelope and deposit in vault.')}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-stretch md:self-auto justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setActiveNav('settlements')}
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <WalletIcon className="w-3.5 h-3.5" />
+                <span>{isRtl ? 'צפה ביומן קופת שליחים' : 'View Settlements'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDismissedSettlementIds(prev => [...prev, latestWarehouseSettlement.id])}
+                className="p-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition cursor-pointer"
+                title={isRtl ? 'הסתר התראה' : 'Dismiss Alert'}
+              >
+                <XIcon className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* DEDICATED ROUTE VIEWS - EXPLICIT CONTENT PER NAVIGATION ROUTE */}
         {activeNav === 'dashboard' && (
           <DashboardRouteView
@@ -2257,6 +2350,7 @@ export default function GhostCrmDashboard() {
               setShowCourierModal(true)
             }}
             onOpenDeleteCourier={(c) => setDeletingCourier(c)}
+            recentSettlements={recentSettlements}
           />
         )}
 
