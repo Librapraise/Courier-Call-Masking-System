@@ -145,6 +145,10 @@ export const TRANSLATIONS = {
     netToWarehouse: 'Net to Pay Warehouseman',
     netToWarehouseHint: 'Gross collected minus courier pay',
     ordersCount: 'Deliveries Today',
+    ordersToSettleCount: 'Deliveries in this Closeout',
+    earlierSettledToday: 'Earlier Settled Today',
+    additionalRunNotice: 'Additional Run Today',
+    reconciledEarlier: 'Already Handed to Warehouseman',
     courierPays: 'Courier pays warehouseman',
     warehousemanCollects: 'Warehouseman collects from courier',
 
@@ -297,6 +301,10 @@ export const TRANSLATIONS = {
     netToWarehouse: 'נטו להעביר למחסנאי',
     netToWarehouseHint: 'מה שנגבה פחות חלקו של השליח',
     ordersCount: 'משלוחים היום',
+    ordersToSettleCount: 'משלוחים לסגירה זו',
+    earlierSettledToday: 'נסגר קודם לכן היום',
+    additionalRunNotice: 'סבב נוסף להיום',
+    reconciledEarlier: 'כבר הועבר למחסנאי',
     courierPays: 'השליח משלם למחסנאי',
     warehousemanCollects: 'המחסנאי גובה מהשליח',
 

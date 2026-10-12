@@ -51,6 +51,12 @@ export interface Courier {
   is_active?: boolean
   todayCash?: number
   todayOrders?: number
+  totalOrdersToday?: number
+  totalCashToday?: number
+  settledOrdersToday?: number
+  settledCashToday?: number
+  pendingOrdersToday?: number
+  pendingCashToday?: number
   isSettledToday?: boolean
   shiftStatus?: 'no_shift' | 'open' | 'reconciled'
   created_at?: string
@@ -83,6 +89,8 @@ export interface Product {
 
 export interface DashboardMetrics {
   courierCashToday: number
+  totalCashToday?: number
+  reconciledCashToday?: number
   totalDeliveriesToday: number
   activeCustomers: number
   lowStockAlerts: number
@@ -1220,31 +1228,31 @@ export function SettlementsRouteView({
         <div className="bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
           <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total Cash Today</span>
           <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
-            ₪{metrics.courierCashToday.toLocaleString()}
+            ₪{(metrics.totalCashToday ?? metrics.courierCashToday ?? 0).toLocaleString()}
           </p>
           <p className="text-[10px] text-slate-400 dark:text-slate-500">Collected across couriers</p>
         </div>
         <div className="bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
           <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Reconciled Cash</span>
           <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">
-            ₪{couriers.filter(c => (c.todayOrders || 0) > 0 && c.isSettledToday).reduce((s, c) => s + (c.todayCash || 0), 0).toLocaleString()}
+            ₪{couriers.reduce((s, c) => s + (c.settledCashToday || 0), 0).toLocaleString()}
           </p>
-          <p className="text-[10px] text-slate-400 dark:text-slate-500">Shift closed out</p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500">Handed to storekeeper</p>
         </div>
         <div className="bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
           <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Outstanding Balance</span>
           <p className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-1">
-            ₪{couriers.filter(c => (c.todayOrders || 0) > 0 && !c.isSettledToday).reduce((s, c) => s + (c.todayCash || 0), 0).toLocaleString()}
+            ₪{couriers.reduce((s, c) => s + (c.todayCash || 0), 0).toLocaleString()}
           </p>
-          <p className="text-[10px] text-slate-400 dark:text-slate-500">Still in courier hands</p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500">Pending next settlement</p>
         </div>
         <div className="bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
           <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Active Couriers</span>
           <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">
-            {couriers.filter(c => (c.todayOrders || 0) > 0).length}
+            {couriers.filter(c => (c.totalOrdersToday || c.todayOrders || 0) > 0).length}
           </p>
           <p className="text-[10px] text-slate-400 dark:text-slate-500">
-            {couriers.filter(c => (c.todayOrders || 0) > 0).length} of {couriers.length} on duty today
+            {couriers.filter(c => (c.totalOrdersToday || c.todayOrders || 0) > 0).length} of {couriers.length} on duty today
           </p>
         </div>
       </div>
@@ -1252,10 +1260,13 @@ export function SettlementsRouteView({
       {/* Active Couriers Shift Status Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {couriers.map(courier => {
-          const ordersCount = courier.todayOrders || 0
+          const pendingCount = courier.pendingOrdersToday ?? courier.todayOrders ?? 0
+          const totalCount = courier.totalOrdersToday ?? pendingCount
           const cash = courier.todayCash || 0
-          const isSettled = ordersCount > 0 && !!courier.isSettledToday
-          const hasNoShift = ordersCount === 0
+          const settledCash = courier.settledCashToday || 0
+          const settledCount = courier.settledOrdersToday || 0
+          const isSettled = totalCount > 0 && pendingCount === 0
+          const hasNoShift = totalCount === 0
 
           return (
             <div key={courier.id} className="bg-white dark:bg-[#0B0F17] rounded-2xl border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs flex flex-col justify-between space-y-3">
@@ -1279,14 +1290,28 @@ export function SettlementsRouteView({
                 )}
               </div>
 
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-baseline justify-between">
-                <span className="text-xs text-slate-500 dark:text-slate-400">{ordersCount} deliveries</span>
-                <span className={`font-mono font-extrabold text-base ${hasNoShift ? 'text-slate-400 dark:text-slate-500' : 'text-emerald-700 dark:text-emerald-400'}`}>
-                  ₪{cash.toLocaleString()}
-                </span>
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 space-y-1">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    {pendingCount > 0
+                      ? `${pendingCount} ${t.ordersToSettleCount || 'deliveries to close'}`
+                      : `${totalCount} ${t.ordersDelivered || 'deliveries done'}`}
+                  </span>
+                  <span className={`font-mono font-extrabold text-base ${hasNoShift ? 'text-slate-400 dark:text-slate-500' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                    ₪{cash.toLocaleString()}
+                  </span>
+                </div>
+                {settledCount > 0 ? (
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500">
+                    <span>{t.earlierSettledToday || 'Earlier settled'}:</span>
+                    <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                      {settledCount} dlvs (₪{Number(settledCash).toLocaleString()})
+                    </span>
+                  </div>
+                ) : null}
               </div>
 
-              {!hasNoShift && !isSettled && cash > 0 ? (
+              {!hasNoShift && !isSettled && (cash > 0 || pendingCount > 0) ? (
                 <button
                   onClick={() => {
                     setSettlingCourier(courier)
@@ -1329,10 +1354,13 @@ export function SettlementsRouteView({
                 </tr>
               ) : (
                 couriers.map(courier => {
-                  const ordersCount = courier.todayOrders || 0
+                  const pendingCount = courier.pendingOrdersToday ?? courier.todayOrders ?? 0
+                  const totalCount = courier.totalOrdersToday ?? pendingCount
                   const cash = courier.todayCash || 0
-                  const isSettled = ordersCount > 0 && !!courier.isSettledToday
-                  const hasNoShift = ordersCount === 0
+                  const settledCash = courier.settledCashToday || 0
+                  const settledCount = courier.settledOrdersToday || 0
+                  const isSettled = totalCount > 0 && pendingCount === 0
+                  const hasNoShift = totalCount === 0
 
                   return (
                     <tr key={courier.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
@@ -1347,10 +1375,24 @@ export function SettlementsRouteView({
                         </div>
                       </td>
                       <td className="py-3.5 px-3 text-slate-700 dark:text-slate-300 font-bold">
-                        {ordersCount}
+                        <div>
+                          <span>{pendingCount}</span>
+                          {settledCount > 0 ? (
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 block font-normal">
+                              ({totalCount} סה״כ היום)
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className={`py-3.5 px-3 font-extrabold text-sm font-mono ${hasNoShift ? 'text-slate-400 dark:text-slate-500' : 'text-emerald-700 dark:text-emerald-400'}`}>
-                        ₪{cash.toLocaleString()}
+                        <div>
+                          <span>₪{cash.toLocaleString()}</span>
+                          {settledCash > 0 ? (
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 block font-normal font-sans">
+                              (₪{settledCash.toLocaleString()} נסגר קודם)
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="py-3.5 px-3">
                         {hasNoShift ? (
@@ -1369,7 +1411,7 @@ export function SettlementsRouteView({
                       </td>
                       <td className="py-3.5 px-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
-                          {!hasNoShift && !isSettled && cash > 0 ? (
+                          {!hasNoShift && !isSettled && (cash > 0 || pendingCount > 0) ? (
                             <button
                               type="button"
                               onClick={() => {

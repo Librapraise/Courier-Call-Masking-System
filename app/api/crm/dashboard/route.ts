@@ -141,8 +141,20 @@ export async function GET() {
 
     const allOrders = orders || []
     const todayOrders = allOrders.filter(o => o.order_date >= todayIso)
-    const courierCashToday = todayOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
     const totalDeliveriesToday = todayOrders.length
+    
+    // Courier cash currently in the street/courier hands (UNSETTLED only)
+    const courierCashToday = todayOrders
+      .filter(o => !o.is_settled)
+      .reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
+    
+    // Total cash across all deliveries today (both settled and pending)
+    const totalCashToday = todayOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
+    
+    // Reconciled cash already handed over to the warehouse today
+    const reconciledCashToday = todayOrders
+      .filter(o => o.is_settled)
+      .reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
 
     // Active customers count and directory
     const { data: customersData, count: customerCount } = await supabaseAdmin
@@ -195,35 +207,75 @@ export async function GET() {
       }
     })
 
-    // Compute courier totals
-    const courierSummaryMap: Record<string, { totalCash: number; count: number; settled: boolean }> = {}
+    // Compute courier totals separating unsettled (pending closeout) from already-settled
+    const courierSummaryMap: Record<string, {
+      totalCashToday: number
+      totalOrdersToday: number
+      settledCashToday: number
+      settledOrdersToday: number
+      pendingCashToday: number
+      pendingOrdersToday: number
+    }> = {}
+
     todayOrders.forEach(o => {
       const cId = (o as any).crm_couriers?.id || (o as any).courier_id || 'unknown'
       if (!courierSummaryMap[cId]) {
-        courierSummaryMap[cId] = { totalCash: 0, count: 0, settled: true }
+        courierSummaryMap[cId] = {
+          totalCashToday: 0,
+          totalOrdersToday: 0,
+          settledCashToday: 0,
+          settledOrdersToday: 0,
+          pendingCashToday: 0,
+          pendingOrdersToday: 0
+        }
       }
-      courierSummaryMap[cId].totalCash += Number(o.total_price) || 0
-      courierSummaryMap[cId].count += 1
-      if (!o.is_settled) {
-        courierSummaryMap[cId].settled = false
+      const price = Number(o.total_price) || 0
+      courierSummaryMap[cId].totalOrdersToday += 1
+      courierSummaryMap[cId].totalCashToday += price
+
+      if (o.is_settled) {
+        courierSummaryMap[cId].settledOrdersToday += 1
+        courierSummaryMap[cId].settledCashToday += price
+      } else {
+        courierSummaryMap[cId].pendingOrdersToday += 1
+        courierSummaryMap[cId].pendingCashToday += price
       }
     })
 
     const couriers = (couriersData || []).map(c => {
-      const summary = courierSummaryMap[c.id] || { totalCash: 0, count: 0, settled: false }
-      const hasOrdersToday = summary.count > 0
+      const s = courierSummaryMap[c.id] || {
+        totalCashToday: 0,
+        totalOrdersToday: 0,
+        settledCashToday: 0,
+        settledOrdersToday: 0,
+        pendingCashToday: 0,
+        pendingOrdersToday: 0
+      }
+      const hasOrdersToday = s.totalOrdersToday > 0
+      const hasPending = s.pendingOrdersToday > 0
+      const isSettledToday = hasOrdersToday && !hasPending
+
       return {
         ...c,
-        todayCash: summary.totalCash,
-        todayOrders: summary.count,
-        isSettledToday: hasOrdersToday ? summary.settled : false,
-        shiftStatus: !hasOrdersToday ? 'no_shift' : summary.settled ? 'reconciled' : 'open'
+        // todayCash & todayOrders represent the active pending batch waiting for closeout!
+        todayCash: s.pendingCashToday,
+        todayOrders: s.pendingOrdersToday,
+        totalOrdersToday: s.totalOrdersToday,
+        totalCashToday: s.totalCashToday,
+        settledOrdersToday: s.settledOrdersToday,
+        settledCashToday: s.settledCashToday,
+        pendingOrdersToday: s.pendingOrdersToday,
+        pendingCashToday: s.pendingCashToday,
+        isSettledToday,
+        shiftStatus: !hasOrdersToday ? 'no_shift' : hasPending ? 'open' : 'reconciled'
       }
     })
 
     return NextResponse.json({
       metrics: {
         courierCashToday,
+        totalCashToday,
+        reconciledCashToday,
         totalDeliveriesToday,
         activeCustomers: customerCount || allOrders.length,
         lowStockAlerts: lowStockCount
@@ -444,6 +496,24 @@ export async function POST(req: Request) {
 
       const orders = ordersToSettle || []
 
+      if (orders.length === 0) {
+        return NextResponse.json({
+          error: 'אין משלוחים פתוחים לסגירה עבור שליח זה היום (כל המשלוחים שבוצעו כבר נסגרו).'
+        }, { status: 400 })
+      }
+
+      // Query previously settled orders today for this courier to detect incremental multi-runs
+      const { data: earlierSettledOrders } = await supabaseAdmin
+        .from('crm_orders')
+        .select('id, total_price')
+        .eq('courier_id', courierId)
+        .gte('order_date', todayIso)
+        .eq('is_settled', true)
+
+      const earlierCount = earlierSettledOrders?.length || 0
+      const earlierSettledTotal = (earlierSettledOrders || []).reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
+      const isAdditionalRun = earlierCount > 0
+
       // Bat Yam = ₪50/delivery, all others = ₪100/delivery
       const BAT_YAM_FEE = 50
       const STANDARD_FEE = 100
@@ -462,7 +532,7 @@ export async function POST(req: Request) {
       const netToWarehouse = Math.max(0, grossCollected - courierPay)
       const totalOrderValue = orders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
 
-      // Mark orders as settled
+      // Mark only this unsettled batch as settled
       await supabaseAdmin
         .from('crm_orders')
         .update({ is_settled: true })
@@ -471,7 +541,11 @@ export async function POST(req: Request) {
         .eq('is_settled', false)
 
       // Record the full financial breakdown in cash_settlements
-      const settlementNotes = notes || `סגירת קופה — ${orders.length} משלוחים | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse}`
+      const settlementNotes = notes || (
+        isAdditionalRun
+          ? `סגירת קופה (סבב נוסף) — ${orders.length} משלוחים בסבב זה | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse} (נסגרו מוקדם יותר: ${earlierCount} משלוחים / ₪${earlierSettledTotal})`
+          : `סגירת קופה — ${orders.length} משלוחים | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse}`
+      )
 
       const { error: insertV2Error } = await supabaseAdmin
         .from('cash_settlements')
@@ -516,14 +590,15 @@ export async function POST(req: Request) {
 
       // ── Message to COURIER ──────────────────────────────────────────────────
       const courierMsg =
-        `💵 *סגירת משמרת — ${courierName}*\n` +
+        `💵 *סגירת משמרת — ${courierName}*${isAdditionalRun ? ` *(סבב נוסף)*` : ''}\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `📦 *משלוחים שבוצעו:* ${orders.length}\n` +
+        (isAdditionalRun ? `ℹ️ _סבב סגירה נוסף להיום (${earlierCount} משלוחים נסגרו והועברו מוקדם יותר)_\n` : '') +
+        `📦 *משלוחים שבוצעו בסבב זה:* ${orders.length}\n` +
         (standardCount > 0 ? `  • ${standardCount} משלוחים רגילים × ₪${STANDARD_FEE} = ₪${standardCount * STANDARD_FEE}\n` : '') +
         (batYamCount   > 0 ? `  • ${batYamCount} משלוחי בת ים × ₪${BAT_YAM_FEE} = ₪${batYamCount * BAT_YAM_FEE}\n` : '') +
         (bonus         > 0 ? `  • 🎁 בונוס: ₪${bonus}\n` : '') +
-        `\n💰 *גבית מלקוחות:* ₪${grossCollected.toLocaleString()}\n` +
-        `📊 *עמלתך למשמרת:* ₪${courierPay.toLocaleString()}\n` +
+        `\n💰 *גבית מלקוחות בסבב זה:* ₪${grossCollected.toLocaleString()}\n` +
+        `📊 *עמלתך בסבב זה:* ₪${courierPay.toLocaleString()}\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
         `💳 *עליך להעביר למחסנאי: ₪${netToWarehouse.toLocaleString()}*`
 
@@ -537,14 +612,15 @@ export async function POST(req: Request) {
 
       // ── Message to WAREHOUSEMAN / ADMINS ────────────────────────────────────
       const adminMsg =
-        `🧾 *התחשבנות שליח — ${courierName}*\n` +
+        `🧾 *התחשבנות שליח — ${courierName}*${isAdditionalRun ? ` *(סבב נוסף)*` : ''}\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `📦 *משלוחים:* ${orders.length}\n` +
+        (isAdditionalRun ? `ℹ️ _סבב סגירה נוסף להיום (${earlierCount} משלוחים נסגרו והועברו מוקדם יותר)_\n` : '') +
+        `📦 *משלוחים בסבב זה:* ${orders.length}\n` +
         (standardCount > 0 ? `  • ${standardCount} רגילים × ₪${STANDARD_FEE} = ₪${standardCount * STANDARD_FEE}\n` : '') +
         (batYamCount   > 0 ? `  • ${batYamCount} בת ים × ₪${BAT_YAM_FEE} = ₪${batYamCount * BAT_YAM_FEE}\n` : '') +
         (bonus         > 0 ? `  • 🎁 בונוס: ₪${bonus}\n` : '') +
-        `\n💰 *גבה מלקוחות:* ₪${grossCollected.toLocaleString()}\n` +
-        `📊 *עמלת שליח:* ₪${courierPay.toLocaleString()}\n` +
+        `\n💰 *גבה מלקוחות בסבב זה:* ₪${grossCollected.toLocaleString()}\n` +
+        `📊 *עמלת שליח בסבב זה:* ₪${courierPay.toLocaleString()}\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
         `💳 *גבה מ${courierName}: ₪${netToWarehouse.toLocaleString()}*`
 

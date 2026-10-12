@@ -86,6 +86,12 @@ interface Courier {
   is_active?: boolean
   todayCash?: number
   todayOrders?: number
+  totalOrdersToday?: number
+  totalCashToday?: number
+  settledOrdersToday?: number
+  settledCashToday?: number
+  pendingOrdersToday?: number
+  pendingCashToday?: number
   isSettledToday?: boolean
   shiftStatus?: 'no_shift' | 'open' | 'reconciled'
   created_at?: string
@@ -118,6 +124,8 @@ interface Product {
 
 interface DashboardMetrics {
   courierCashToday: number
+  totalCashToday?: number
+  reconciledCashToday?: number
   totalDeliveriesToday: number
   activeCustomers: number
   lowStockAlerts: number
@@ -1160,11 +1168,36 @@ export default function GhostCrmDashboard() {
             </div>
 
             <form onSubmit={handleSettlementSubmit} className="p-5 space-y-4">
+              {/* Incremental Multi-Run Notice */}
+              {settlingCourier.settledOrdersToday && settlingCourier.settledOrdersToday > 0 ? (
+                <div className="p-3.5 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800 text-xs text-indigo-950 dark:text-indigo-200 space-y-1">
+                  <div className="flex items-center justify-between font-bold">
+                    <span className="flex items-center gap-1.5">
+                      <span>🔄</span>
+                      <span>{t.additionalRunNotice || 'סבב נוסף להיום'}</span>
+                    </span>
+                    <span className="text-[11px] font-mono bg-white/80 dark:bg-slate-900 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-700">
+                      {settlingCourier.settledOrdersToday} {t.ordersDelivered || 'משלוחים'} {t.reconciledEarlier || 'כבר נסגרו והועברו'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
+                    ₪{Number(settlingCourier.settledCashToday || 0).toLocaleString()} כבר נמסרו למחסנאי בסגירה הקודמת. חישוב זה כולל <strong>אך ורק</strong> את המשלוחים החדשים מהסבב הנוכחי!
+                  </p>
+                </div>
+              ) : null}
+
               {/* Row 1 — Orders today */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800">
-                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">{t.ordersCount}</p>
+                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">
+                    {t.ordersToSettleCount || t.ordersCount}
+                  </p>
                   <p className="text-2xl font-black text-slate-900 dark:text-white">{settleOrderCount}</p>
+                  {settlingCourier.totalOrdersToday && settlingCourier.totalOrdersToday > settleOrderCount ? (
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                      (מתוך {settlingCourier.totalOrdersToday} סה״כ היום)
+                    </p>
+                  ) : null}
                 </div>
                 <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800">
                   <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">{t.deliveryFeesBreakdown}</p>
