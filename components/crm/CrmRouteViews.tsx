@@ -670,6 +670,15 @@ export function OrdersRouteView({
   couriers?: Courier[]
   onAssignCourier?: (orderId: string, courierId: string | null) => Promise<void>
 }) {
+  const todayStr = new Date().toISOString().split('T')[0]
+  const todayOrders = orders.filter(o => {
+    if (!o.order_date) return false
+    return o.order_date.startsWith(todayStr) || new Date(o.order_date).toDateString() === new Date().toDateString()
+  })
+  const todayOrdersTotal = todayOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
+  const todayTotalValue = Math.max(metrics.totalCashToday || 0, todayOrdersTotal)
+  const todayOrdersCount = Math.max(metrics.totalDeliveriesToday || 0, todayOrders.length)
+
   return (
     <div className="space-y-6">
       {/* Orders Specific KPI Summary Bar */}
@@ -681,7 +690,7 @@ export function OrdersRouteView({
         </div>
         <div className="bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
           <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Today's Shift</span>
-          <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">{metrics.totalDeliveriesToday || orders.length}</p>
+          <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">{todayOrdersCount}</p>
           <p className="text-[10px] text-slate-400 dark:text-slate-500">Active today</p>
         </div>
         <div className="bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
@@ -694,9 +703,9 @@ export function OrdersRouteView({
         <div className="bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
           <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total Value</span>
           <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">
-            ₪{orders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0).toLocaleString()}
+            ₪{todayTotalValue.toLocaleString()}
           </p>
-          <p className="text-[10px] text-slate-400 dark:text-slate-500">Gross order volume</p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500">Today&apos;s order volume</p>
         </div>
       </div>
 
@@ -733,20 +742,20 @@ export function OrdersRouteView({
 
           <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300">
             <button
-              onClick={() => setTodayOnly(false)}
-              className={`px-3 py-1 rounded-lg transition cursor-pointer ${
-                !todayOnly ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs font-bold' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              All Orders
-            </button>
-            <button
               onClick={() => setTodayOnly(true)}
               className={`px-3 py-1 rounded-lg transition cursor-pointer ${
                 todayOnly ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs font-bold' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              Today's Shift
+              {t.todayShift || "Today's Shift"}
+            </button>
+            <button
+              onClick={() => setTodayOnly(false)}
+              className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                !todayOnly ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs font-bold' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {t.allOrders || "All Orders"}
             </button>
           </div>
         </div>
@@ -760,13 +769,13 @@ export function OrdersRouteView({
               <tr className="bg-slate-50 dark:bg-[#0F1420] border-b border-slate-100 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 <th className="py-3.5 px-4">{t.colCustomerName}</th>
                 <th className="py-3.5 px-3">{t.colCity}</th>
+                <th className="py-3.5 px-3 min-w-[150px]">{t.colCourier || 'Courier'}</th>
                 <th className="py-3.5 px-3">{t.colPhone}</th>
                 <th className="py-3.5 px-3">{t.colTelegram}</th>
                 <th className="py-3.5 px-3">{t.colLastBrand}</th>
                 <th className="py-3.5 px-3">{t.colMenuItems}</th>
                 <th className="py-3.5 px-3">{t.colActualItems}</th>
                 <th className="py-3.5 px-4">{t.colPrice}</th>
-                <th className="py-3.5 px-3 min-w-[150px]">{t.colCourier || 'Courier'}</th>
                 <th className="py-3.5 px-3 text-center">{t.colActions}</th>
               </tr>
             </thead>
@@ -802,6 +811,31 @@ export function OrdersRouteView({
                           <MapPinIcon className="w-3.5 h-3.5 text-slate-400" />
                           {order.city}
                         </span>
+                      </td>
+                      <td className="py-3.5 px-3" onClick={e => e.stopPropagation()}>
+                        <div className="relative inline-block w-full min-w-[145px]">
+                          <select
+                            value={order.crm_couriers?.id || ''}
+                            onChange={e => {
+                              const val = e.target.value || null
+                              if (onAssignCourier) {
+                                onAssignCourier(order.id, val)
+                              }
+                            }}
+                            className={`w-full py-1.5 px-2.5 rounded-xl text-xs font-semibold border transition cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 ${
+                              order.crm_couriers?.id
+                                ? 'bg-indigo-50/90 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200 font-bold hover:bg-indigo-100/90 dark:hover:bg-indigo-900/50'
+                                : 'bg-slate-50 dark:bg-slate-900/60 border-dashed border-slate-300 dark:border-slate-700 text-slate-400 dark:text-slate-500 hover:border-indigo-300 hover:text-slate-600 dark:hover:text-slate-300'
+                            }`}
+                          >
+                            <option value="" className="dark:bg-slate-900">{t.unassignedCourier || 'Unassigned'}</option>
+                            {(couriers || []).map(c => (
+                              <option key={c.id} value={c.id} className="dark:bg-slate-900">
+                                🛵 {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </td>
                       <td className="py-3.5 px-3 font-mono" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5">
@@ -865,31 +899,6 @@ export function OrdersRouteView({
                       </td>
                       <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white text-sm whitespace-nowrap">
                         ₪{Number(order.total_price || 0).toLocaleString()}
-                      </td>
-                      <td className="py-3.5 px-3" onClick={e => e.stopPropagation()}>
-                        <div className="relative inline-block w-full min-w-[145px]">
-                          <select
-                            value={order.crm_couriers?.id || ''}
-                            onChange={e => {
-                              const val = e.target.value || null
-                              if (onAssignCourier) {
-                                onAssignCourier(order.id, val)
-                              }
-                            }}
-                            className={`w-full py-1.5 px-2.5 rounded-xl text-xs font-semibold border transition cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 ${
-                              order.crm_couriers?.id
-                                ? 'bg-indigo-50/90 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200 font-bold hover:bg-indigo-100/90 dark:hover:bg-indigo-900/50'
-                                : 'bg-slate-50 dark:bg-slate-900/60 border-dashed border-slate-300 dark:border-slate-700 text-slate-400 dark:text-slate-500 hover:border-indigo-300 hover:text-slate-600 dark:hover:text-slate-300'
-                            }`}
-                          >
-                            <option value="" className="dark:bg-slate-900">{t.unassignedCourier || 'Unassigned'}</option>
-                            {(couriers || []).map(c => (
-                              <option key={c.id} value={c.id} className="dark:bg-slate-900">
-                                🛵 {c.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
                       </td>
                       <td className="py-3.5 px-3 text-center" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1.5">

@@ -204,7 +204,7 @@ export default function GhostCrmDashboard() {
   const [selectedBrand, setSelectedBrand] = useState<string>('ALL')
   const [brandSearchTerm, setBrandSearchTerm] = useState('')
   const [selectedCity, setSelectedCity] = useState<string>('ALL')
-  const [todayOnly, setTodayOnly] = useState(false)
+  const [todayOnly, setTodayOnly] = useState(true)
   const [settlementFilter, setSettlementFilter] = useState<'ALL' | 'OPEN' | 'SETTLED'>('ALL')
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -610,7 +610,13 @@ export default function GhostCrmDashboard() {
 
     return orders.filter(order => {
       // Shift filter
-      if (todayOnly && !order.order_date?.startsWith(todayStr)) return false
+      if (todayOnly) {
+        const orderDateStr = order.order_date || ''
+        const isToday =
+          orderDateStr.startsWith(todayStr) ||
+          (orderDateStr && new Date(orderDateStr).toDateString() === new Date().toDateString())
+        if (!isToday) return false
+      }
 
       // Settlement filter
       if (settlementFilter === 'OPEN' && order.is_settled) return false
@@ -663,7 +669,7 @@ export default function GhostCrmDashboard() {
     let count = 0
     if (selectedBrand !== 'ALL') count++
     if (selectedCity !== 'ALL') count++
-    if (todayOnly) count++
+    if (!todayOnly) count++
     if (settlementFilter !== 'ALL') count++
     if (searchQuery) count++
     return count
@@ -672,7 +678,7 @@ export default function GhostCrmDashboard() {
   const resetAllFilters = () => {
     setSelectedBrand('ALL')
     setSelectedCity('ALL')
-    setTodayOnly(false)
+    setTodayOnly(true)
     setSettlementFilter('ALL')
     setSearchQuery('')
     setBrandSearchTerm('')
