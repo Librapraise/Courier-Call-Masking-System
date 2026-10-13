@@ -770,6 +770,7 @@ export default function GhostCrmDashboard() {
 
     const headers = [
       t.colCustomerName,
+      t.colCourier || 'Assigned Courier',
       t.colCity,
       t.colPhone,
       t.colTelegram,
@@ -782,6 +783,7 @@ export default function GhostCrmDashboard() {
 
     const rows = filteredOrders.map(o => [
       `"${(o.crm_customers?.address_name || o.address || '').replace(/"/g, '""')}"`,
+      `"${(o.crm_couriers?.name || '').replace(/"/g, '""')}"`,
       `"${(o.city || '').replace(/"/g, '""')}"`,
       `"${o.crm_customers?.phone_number || ''}"`,
       `"${o.crm_customers?.telegram_handle || ''}"`,

@@ -768,8 +768,8 @@ export function OrdersRouteView({
             <thead>
               <tr className="bg-slate-50 dark:bg-[#0F1420] border-b border-slate-100 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 <th className="py-3.5 px-4">{t.colCustomerName}</th>
-                <th className="py-3.5 px-3">{t.colCity}</th>
                 <th className="py-3.5 px-3 min-w-[150px]">{t.colCourier || 'Courier'}</th>
+                <th className="py-3.5 px-3">{t.colCity}</th>
                 <th className="py-3.5 px-3">{t.colPhone}</th>
                 <th className="py-3.5 px-3">{t.colTelegram}</th>
                 <th className="py-3.5 px-3">{t.colLastBrand}</th>
@@ -806,12 +806,6 @@ export function OrdersRouteView({
                           <span className="truncate">{cust?.address_name || order.address}</span>
                         </div>
                       </td>
-                      <td className="py-3.5 px-3 text-slate-700 dark:text-slate-300 font-semibold whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1">
-                          <MapPinIcon className="w-3.5 h-3.5 text-slate-400" />
-                          {order.city}
-                        </span>
-                      </td>
                       <td className="py-3.5 px-3" onClick={e => e.stopPropagation()}>
                         <div className="relative inline-block w-full min-w-[145px]">
                           <select
@@ -836,6 +830,12 @@ export function OrdersRouteView({
                             ))}
                           </select>
                         </div>
+                      </td>
+                      <td className="py-3.5 px-3 text-slate-700 dark:text-slate-300 font-semibold whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1">
+                          <MapPinIcon className="w-3.5 h-3.5 text-slate-400" />
+                          {order.city}
+                        </span>
                       </td>
                       <td className="py-3.5 px-3 font-mono" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5">
