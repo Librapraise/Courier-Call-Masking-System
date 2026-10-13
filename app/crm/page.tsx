@@ -967,7 +967,7 @@ export default function GhostCrmDashboard() {
   return (
     <div
       dir={isRtl ? 'rtl' : 'ltr'}
-      className="min-h-screen bg-[#F8FAFC] dark:bg-[#070A11] text-slate-900 dark:text-slate-100 font-sans flex antialiased transition-colors duration-200"
+      className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#F8FAFC] dark:bg-[#070A11] text-slate-900 dark:text-slate-100 font-sans flex antialiased transition-colors duration-200"
     >
       {/* Toast Notification */}
       {notification && (
@@ -1553,7 +1553,7 @@ export default function GhostCrmDashboard() {
       <aside
         data-scrollbar="hidden"
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-        className={`w-72 bg-white dark:bg-[#0B0F17] p-5 flex flex-col justify-between shrink-0 select-none overflow-y-auto no-scrollbar transition-all duration-300 ${
+        className={`w-80 max-w-[85vw] bg-white dark:bg-[#0B0F17] p-5 flex flex-col justify-between shrink-0 select-none overflow-y-auto overflow-x-hidden no-scrollbar transition-all duration-300 ${
           isMobileSidebarOpen
             ? `fixed inset-y-0 z-50 shadow-2xl h-screen ${
                 isRtl ? 'right-0 border-l border-slate-200/80 dark:border-slate-800/80' : 'left-0 border-r border-slate-200/80 dark:border-slate-800/80'
@@ -1729,16 +1729,16 @@ export default function GhostCrmDashboard() {
           {/* ======================================================== */}
           {/* STRUCTURED FILTERS IN SIDEBAR (Standard CRM Architecture)  */}
           {/* ======================================================== */}
-          <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
-                <FilterIcon className="w-3.5 h-3.5" />
-                <span>{t.filtersHeader}</span>
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-4 min-w-0 w-full overflow-hidden">
+            <div className="flex items-center justify-between min-w-0">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1.5 min-w-0 truncate">
+                <FilterIcon className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{t.filtersHeader}</span>
               </span>
               {activeFiltersCount > 0 && (
                 <button
                   onClick={resetAllFilters}
-                  className="text-[10px] text-[#4352E8] dark:text-indigo-400 hover:underline font-bold cursor-pointer"
+                  className="text-[10px] text-[#4352E8] dark:text-indigo-400 hover:underline font-bold cursor-pointer shrink-0 ml-1.5"
                 >
                   {t.clearAllFilters} ({activeFiltersCount})
                 </button>
@@ -1746,12 +1746,12 @@ export default function GhostCrmDashboard() {
             </div>
 
             {/* Shift Filter: Today's Shift vs All Time */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t.filterShiftTitle}</label>
-              <div className="grid grid-cols-2 gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-transparent dark:border-slate-800">
+            <div className="space-y-1.5 min-w-0">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block truncate">{t.filterShiftTitle}</label>
+              <div className="grid grid-cols-2 gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-transparent dark:border-slate-800 min-w-0">
                 <button
                   onClick={() => setTodayOnly(true)}
-                  className={`py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                  className={`py-1.5 px-1 rounded-lg text-[11px] font-bold transition cursor-pointer truncate min-w-0 ${
                     todayOnly
                       ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
                       : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -1761,7 +1761,7 @@ export default function GhostCrmDashboard() {
                 </button>
                 <button
                   onClick={() => setTodayOnly(false)}
-                  className={`py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                  className={`py-1.5 px-1 rounded-lg text-[11px] font-bold transition cursor-pointer truncate min-w-0 ${
                     !todayOnly
                       ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
                       : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -1773,12 +1773,12 @@ export default function GhostCrmDashboard() {
             </div>
 
             {/* Settlement Status Filter */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Settlement</label>
-              <div className="grid grid-cols-3 gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl text-[10px] font-bold text-center border border-transparent dark:border-slate-800">
+            <div className="space-y-1.5 min-w-0">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block truncate">Settlement</label>
+              <div className="grid grid-cols-3 gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl text-[10px] font-bold text-center border border-transparent dark:border-slate-800 min-w-0">
                 <button
                   onClick={() => setSettlementFilter('ALL')}
-                  className={`py-1 rounded-lg transition cursor-pointer ${
+                  className={`py-1 rounded-lg transition cursor-pointer truncate min-w-0 ${
                     settlementFilter === 'ALL'
                       ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
                       : 'text-slate-500 dark:text-slate-400'
@@ -1788,7 +1788,7 @@ export default function GhostCrmDashboard() {
                 </button>
                 <button
                   onClick={() => setSettlementFilter('OPEN')}
-                  className={`py-1 rounded-lg transition cursor-pointer ${
+                  className={`py-1 rounded-lg transition cursor-pointer truncate min-w-0 ${
                     settlementFilter === 'OPEN'
                       ? 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-400 shadow-xs'
                       : 'text-slate-500 dark:text-slate-400'
@@ -1798,7 +1798,7 @@ export default function GhostCrmDashboard() {
                 </button>
                 <button
                   onClick={() => setSettlementFilter('SETTLED')}
-                  className={`py-1 rounded-lg transition cursor-pointer ${
+                  className={`py-1 rounded-lg transition cursor-pointer truncate min-w-0 ${
                     settlementFilter === 'SETTLED'
                       ? 'bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-400 shadow-xs'
                       : 'text-slate-500 dark:text-slate-400'
@@ -1810,14 +1810,14 @@ export default function GhostCrmDashboard() {
             </div>
 
             {/* Brand Persona Selector */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t.filterBrandsTitle}</label>
+            <div className="space-y-2 min-w-0">
+              <div className="flex items-center justify-between min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0 truncate">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate">{t.filterBrandsTitle}</label>
                   <button
                     type="button"
                     onClick={() => setShowBrandManagerModal(true)}
-                    className="p-1 rounded-md text-slate-400 hover:text-[#4352E8] dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 transition cursor-pointer"
+                    className="p-1 rounded-md text-slate-400 hover:text-[#4352E8] dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 transition cursor-pointer shrink-0"
                     title="Manage Brand Personas (Add, Edit, Delete)"
                   >
                     <SettingsIcon className="w-3.5 h-3.5" />
@@ -1826,7 +1826,7 @@ export default function GhostCrmDashboard() {
                 {selectedBrand !== 'ALL' && (
                   <button
                     onClick={() => setSelectedBrand('ALL')}
-                    className="text-[10px] text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                    className="text-[10px] text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer shrink-0 ml-1.5"
                   >
                     Reset
                   </button>
@@ -1834,7 +1834,7 @@ export default function GhostCrmDashboard() {
               </div>
 
               {/* Brand Search Input */}
-              <div className="relative">
+              <div className="relative min-w-0">
                 <input
                   type="text"
                   value={brandSearchTerm}
@@ -1848,18 +1848,18 @@ export default function GhostCrmDashboard() {
               <div
                 data-scrollbar="hidden"
                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-                className="max-h-36 overflow-y-auto space-y-0.5 pr-1 no-scrollbar"
+                className="max-h-36 overflow-y-auto overflow-x-hidden space-y-0.5 pr-1 no-scrollbar min-w-0 w-full"
               >
                 <button
                   onClick={() => setSelectedBrand('ALL')}
-                  className={`w-full text-left px-2 py-1.5 rounded-md text-xs font-medium flex items-center justify-between cursor-pointer ${
+                  className={`w-full text-left px-2 py-1.5 rounded-md text-xs font-medium flex items-center justify-between cursor-pointer min-w-0 ${
                     selectedBrand === 'ALL'
                       ? 'bg-slate-900 dark:bg-slate-800 text-white font-bold'
                       : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/60'
                   }`}
                 >
-                  <span>{t.allBrands}</span>
-                  <span className="text-[10px]">{orders.length}</span>
+                  <span className="truncate min-w-0 flex-1">{t.allBrands}</span>
+                  <span className="text-[10px] shrink-0 ml-1.5">{orders.length}</span>
                 </button>
                 {filteredBrandsList.map(b => {
                   const cnt = brandOrderCounts[b.name] || 0
@@ -1868,15 +1868,15 @@ export default function GhostCrmDashboard() {
                     <button
                       key={b.id}
                       onClick={() => setSelectedBrand(b.name)}
-                      className={`w-full text-left px-2 py-1 rounded-md text-xs transition flex items-center justify-between cursor-pointer ${
+                      className={`w-full text-left px-2 py-1 rounded-md text-xs transition flex items-center justify-between cursor-pointer min-w-0 ${
                         isSel
                           ? 'bg-[#4352E8] text-white font-bold'
                           : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/60'
                       }`}
                     >
-                      <span className="truncate">{b.name}</span>
+                      <span className="truncate min-w-0 flex-1">{b.name}</span>
                       {cnt > 0 && (
-                        <span className={`text-[10px] px-1.5 rounded-full ${isSel ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold'}`}>
+                        <span className={`text-[10px] px-1.5 rounded-full shrink-0 ml-1.5 ${isSel ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold'}`}>
                           {cnt}
                         </span>
                       )}
@@ -1887,8 +1887,8 @@ export default function GhostCrmDashboard() {
             </div>
 
             {/* City Selector */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t.filterCitiesTitle}</label>
+            <div className="space-y-1.5 min-w-0">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block truncate">{t.filterCitiesTitle}</label>
               <select
                 value={selectedCity}
                 onChange={e => setSelectedCity(e.target.value)}
@@ -1915,44 +1915,44 @@ export default function GhostCrmDashboard() {
         </div>
 
         {/* Link to Courier Service & Masked Calling Admin */}
-        <div className="pt-3 pb-1 border-t border-slate-100 dark:border-slate-800">
+        <div className="pt-3 pb-1 border-t border-slate-100 dark:border-slate-800 min-w-0">
           <Link
             href="/admin"
-            className="w-full flex items-center justify-between px-3 py-2 rounded-xl font-bold text-xs bg-slate-50 dark:bg-slate-900/80 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 transition border border-slate-200/80 dark:border-slate-800 shadow-xs group cursor-pointer"
+            className="w-full flex items-center justify-between px-3 py-2 rounded-xl font-bold text-xs bg-slate-50 dark:bg-slate-900/80 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 transition border border-slate-200/80 dark:border-slate-800 shadow-xs group cursor-pointer min-w-0"
             title="Manage Couriers, Masked Calling, Twilio & Call Logs"
           >
-            <div className="flex items-center gap-2">
-              <PhoneIcon className="w-3.5 h-3.5 text-[#4352E8] group-hover:scale-110 transition" />
-              <span>Courier Masking Admin</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <PhoneIcon className="w-3.5 h-3.5 text-[#4352E8] group-hover:scale-110 transition shrink-0" />
+              <span className="truncate">Courier Masking Admin</span>
             </div>
-            <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-[#4352E8] text-white">/admin</span>
+            <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-[#4352E8] text-white shrink-0 ml-1.5">/admin</span>
           </Link>
         </div>
 
         {/* Theme Preference Quick Switcher in Sidebar */}
-        <div className="py-2.5 px-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
-          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+        <div className="py-2.5 px-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between min-w-0">
+          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">
             {lang === 'he' ? 'ערכת נושא' : 'Theme Mode'}
           </span>
           <ThemeToggle lang={lang} showLabel={false} align="end" direction="up" />
         </div>
 
         {/* Authenticated User Profile Card with Hover/Click Dropdown Reveal */}
-        <div className="relative pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
+        <div className="relative pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3 min-w-0">
           {/* Dropdown Container */}
           <div
-            className="relative"
+            className="relative min-w-0"
             onMouseEnter={() => setShowProfileDropdown(true)}
             onMouseLeave={() => setShowProfileDropdown(false)}
           >
             {/* The Trigger Profile Card */}
             <div
               onClick={() => setShowProfileDropdown(prev => !prev)}
-              className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-850 border border-transparent hover:border-slate-200 dark:hover:border-slate-800 transition cursor-pointer group"
+              className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-850 border border-transparent hover:border-slate-200 dark:hover:border-slate-800 transition cursor-pointer group min-w-0"
               title="Click or hover to reveal Profile & Settings options"
             >
               <div className="flex items-center gap-3 min-w-0">
-                <div className="h-9 w-9 rounded-full bg-[#1E2235] text-white flex items-center justify-center font-bold text-xs shadow-xs group-hover:ring-2 group-hover:ring-[#4352E8]/40 transition">
+                <div className="h-9 w-9 rounded-full bg-[#1E2235] text-white flex items-center justify-center font-bold text-xs shadow-xs group-hover:ring-2 group-hover:ring-[#4352E8]/40 transition shrink-0">
                   {userProfile?.name?.slice(0, 2).toUpperCase() || 'GA'}
                 </div>
                 <div className="min-w-0">
@@ -1960,19 +1960,19 @@ export default function GhostCrmDashboard() {
                     {userProfile?.name || 'Persian Team Manager'}
                   </p>
                   <div className="flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold truncate">
                       {userProfile?.role || 'CRM Manager'}
                     </span>
                   </div>
                 </div>
               </div>
-              <ChevronRightIcon className={`w-3.5 h-3.5 text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-300 transition ${isRtl ? 'rotate-180' : ''}`} />
+              <ChevronRightIcon className={`w-3.5 h-3.5 text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-300 transition shrink-0 ${isRtl ? 'rotate-180' : ''}`} />
             </div>
 
             {/* Elevated Dropdown Menu Revealed on Hover/Click */}
             {showProfileDropdown && (
-              <div className="absolute bottom-full start-0 mb-2 w-64 bg-white dark:bg-[#0B0F17] rounded-2xl shadow-xl border border-slate-200/90 dark:border-slate-800 py-2.5 z-50 animate-fadeIn space-y-1">
+              <div className="absolute bottom-full start-0 mb-2 w-full max-w-[260px] bg-white dark:bg-[#0B0F17] rounded-2xl shadow-xl border border-slate-200/90 dark:border-slate-800 py-2.5 z-50 animate-fadeIn space-y-1">
                 {/* Header in Dropdown */}
                 <div className="px-3.5 py-2 border-b border-slate-100 dark:border-slate-800">
                   <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{userProfile?.name || 'Admin'}</p>
@@ -2101,7 +2101,7 @@ export default function GhostCrmDashboard() {
       <main
         data-scrollbar="hidden"
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-        className="flex-1 min-w-0 p-4 sm:p-8 space-y-6 overflow-y-auto no-scrollbar"
+        className="flex-1 min-w-0 max-w-full p-4 sm:p-8 space-y-6 overflow-y-auto overflow-x-hidden no-scrollbar"
       >
         {/* Top Header & Dynamic Navigation Title */}
         <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
