@@ -50,7 +50,8 @@ export interface IngestionBatchSummary {
  * Formats a clean, high-impact Telegram receipt message in Hebrew.
  */
 export function formatBatchReceipt(summary: IngestionBatchSummary): string {
-  const crmLink = summary.crmUrl || 'https://www.couriercall.site/crm'
+  const defaultBase = (process.env.NEXT_PUBLIC_APP_URL || 'https://www.couriercall.site').replace(/\/+$/, '')
+  const crmLink = summary.crmUrl || `${defaultBase}/crm`
 
   let msg = `✅ *נקלטו ${summary.totalProcessed} משלוחים בהצלחה בסיארם!*\n`
   msg += `━━━━━━━━━━━━━━━━━━━━━\n\n`

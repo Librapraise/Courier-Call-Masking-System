@@ -684,7 +684,7 @@ export async function POST(req: Request) {
           }
         }
 
-        // Match warehouse profile phones with crm_couriers roster
+        // Match warehouse profile phones or IDs with auth & crm_couriers roster
         for (const wp of warehouseProfiles || []) {
           const cleanPhone = (wp.phone_number || '').replace(/\D/g, '')
           if (cleanPhone) {
@@ -696,15 +696,9 @@ export async function POST(req: Request) {
               warehouseTelegramIds.add(String(matched.telegram_id).trim())
             }
           }
-        }
-
-        // Also match known warehouse keywords in roster (e.g. מחסנאי / warehouse)
-        for (const r of crmRoster || []) {
-          const lowerName = (r.name || '').toLowerCase()
-          if (lowerName.includes('מחסנאי') || lowerName.includes('warehouse')) {
-            if (r.telegram_id) {
-              warehouseTelegramIds.add(String(r.telegram_id).trim())
-            }
+          const authMatch = (authUsersList?.users || []).find(u => u.id === wp.id)
+          if (authMatch?.user_metadata?.telegram_id) {
+            warehouseTelegramIds.add(String(authMatch.user_metadata.telegram_id).trim())
           }
         }
       } catch (lookupErr) {
@@ -1059,19 +1053,15 @@ export async function POST(req: Request) {
             const cleanPhone = (wp.phone_number || '').replace(/\D/g, '')
             const matched = (crmRoster || []).find(r => (r.phone_number || '').replace(/\D/g, '').endsWith(cleanPhone.slice(-9)))
             if (matched?.telegram_id) warehouseTelegramIds.add(String(matched.telegram_id).trim())
+            const authMatch = (authUsersList?.users || []).find(u => u.id === wp.id)
+            if (authMatch?.user_metadata?.telegram_id) warehouseTelegramIds.add(String(authMatch.user_metadata.telegram_id).trim())
           }
           if (wp.role === 'accountant') {
             const cleanPhone = (wp.phone_number || '').replace(/\D/g, '')
             const matched = (crmRoster || []).find(r => (r.phone_number || '').replace(/\D/g, '').endsWith(cleanPhone.slice(-9)))
             if (matched?.telegram_id) accountantTelegramIds.add(String(matched.telegram_id).trim())
-          }
-        }
-
-        // Match roster for warehouse
-        for (const r of crmRoster || []) {
-          const lowerName = (r.name || '').toLowerCase()
-          if (lowerName.includes('מחסנאי') || lowerName.includes('warehouse')) {
-            if (r.telegram_id) warehouseTelegramIds.add(String(r.telegram_id).trim())
+            const authMatch = (authUsersList?.users || []).find(u => u.id === wp.id)
+            if (authMatch?.user_metadata?.telegram_id) accountantTelegramIds.add(String(authMatch.user_metadata.telegram_id).trim())
           }
         }
       } catch (e) {}

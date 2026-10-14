@@ -63,10 +63,11 @@ export async function POST(req: NextRequest) {
     if (messageText.startsWith('/start') || messageText.startsWith('/help')) {
       const botToken = process.env.TELEGRAM_BOT_TOKEN || ''
       if (botToken && chatId) {
+        const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://www.couriercall.site').replace(/\/+$/, '')
         await sendTelegramMessage(botToken, {
           chat_id: chatId,
           parse_mode: 'Markdown',
-          text: `👋 *שלום וברוכים הבאים ל-Persian Team Management Bot*\n\nכדי להזין משלוחים לסיארם:\n1. פשוט סמן את כל הודעות המשלוח והעבר (Forward) אותן לכאן.\n2. הבוט יעדכן אוטומטית את מאגר הלקוחות, יחשב את קופת השליחים, ויוריד את המלאי מהמחסן.\n\n🔗 [פתח את ה-CRM](https://www.couriercall.site/crm)`
+          text: `👋 *שלום וברוכים הבאים ל-Persian Team Management Bot*\n\nכדי להזין משלוחים לסיארם:\n1. פשוט סמן את כל הודעות המשלוח והעבר (Forward) אותן לכאן.\n2. הבוט יעדכן אוטומטית את מאגר הלקוחות, יחשב את קופת השליחים, ויוריד את המלאי מהמחסן.\n\n🔗 [פתח את ה-CRM](${appUrl}/crm)`
         })
       }
       return NextResponse.json({ ok: true, status: 'command_handled' })
