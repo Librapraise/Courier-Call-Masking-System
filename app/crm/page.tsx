@@ -1174,112 +1174,117 @@ export default function GhostCrmDashboard() {
       {/* MODAL 1: STOCK ADJUSTMENT                                 */}
       {/* ======================================================== */}
       {adjustingProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto">
           <div
-            className="w-full max-w-md rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-4"
+            className="relative w-full max-w-md my-auto rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col max-h-[92vh] overflow-hidden"
             dir={isRtl ? 'rtl' : 'ltr'}
           >
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <BoxIcon className="w-5 h-5 text-[#4352E8] dark:text-indigo-400" />
+            {/* Modal Header */}
+            <div className="shrink-0 flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-3.5">
+              <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <BoxIcon className="w-5 h-5 text-[#4352E8] dark:text-indigo-400 shrink-0" />
                 <span>{t.adjustStockModalTitle}</span>
               </h3>
               <button
+                type="button"
                 onClick={() => setAdjustingProduct(null)}
-                className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-sm cursor-pointer"
+                className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-sm cursor-pointer p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
               >
                 ✕
               </button>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{t.productName}</p>
-                <p className="font-bold text-slate-900 dark:text-white text-sm">{adjustingProduct.name}</p>
-              </div>
-              <div className="text-end">
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{t.stockOnHand}</p>
-                <p className="font-bold text-[#4352E8] dark:text-indigo-400 text-sm">
-                  {adjustingProduct.stock_on_hand} {adjustingProduct.unit === 'g' ? t.grams : t.units}
-                </p>
-              </div>
-            </div>
+            <form onSubmit={handleStockAdjustmentSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4 overscroll-contain">
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{t.productName}</p>
+                    <p className="font-bold text-slate-900 dark:text-white text-sm">{adjustingProduct.name}</p>
+                  </div>
+                  <div className="text-end">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{t.stockOnHand}</p>
+                    <p className="font-bold text-[#4352E8] dark:text-indigo-400 text-sm">
+                      {adjustingProduct.stock_on_hand} {adjustingProduct.unit === 'g' ? t.grams : t.units}
+                    </p>
+                  </div>
+                </div>
 
-            <form onSubmit={handleStockAdjustmentSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {t.adjustmentType}
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setAdjustType('ADD')}
-                    className={`py-2 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                      adjustType === 'ADD'
-                        ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500 text-emerald-700 dark:text-emerald-400'
-                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-                    }`}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    {t.adjustmentType}
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAdjustType('ADD')}
+                      className={`py-2 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                        adjustType === 'ADD'
+                          ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500 text-emerald-700 dark:text-emerald-400'
+                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      {t.addStock}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdjustType('DEDUCT')}
+                      className={`py-2 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                        adjustType === 'DEDUCT'
+                          ? 'bg-rose-50 dark:bg-rose-500/10 border-rose-500 text-rose-700 dark:text-rose-400'
+                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      {t.deductStock}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    {t.adjustmentAmount} ({adjustingProduct.unit === 'g' ? t.grams : t.units})
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0.1"
+                    required
+                    value={adjustQty}
+                    onChange={e => setAdjustQty(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    {t.reason}
+                  </label>
+                  <select
+                    value={adjustReason}
+                    onChange={e => setAdjustReason(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
                   >
-                    {t.addStock}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAdjustType('DEDUCT')}
-                    className={`py-2 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                      adjustType === 'DEDUCT'
-                        ? 'bg-rose-50 dark:bg-rose-500/10 border-rose-500 text-rose-700 dark:text-rose-400'
-                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-                    }`}
-                  >
-                    {t.deductStock}
-                  </button>
+                    <option value="RESTOCK">{t.reasonRestock}</option>
+                    <option value="PHYSICAL_AUDIT">{t.reasonAudit}</option>
+                    <option value="DAMAGED">{t.reasonDamaged}</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    {t.notes}
+                  </label>
+                  <input
+                    type="text"
+                    value={adjustNotes}
+                    onChange={e => setAdjustNotes(e.target.value)}
+                    placeholder="Optional audit comment..."
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
+                  />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {t.adjustmentAmount} ({adjustingProduct.unit === 'g' ? t.grams : t.units})
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  min="0.1"
-                  required
-                  value={adjustQty}
-                  onChange={e => setAdjustQty(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {t.reason}
-                </label>
-                <select
-                  value={adjustReason}
-                  onChange={e => setAdjustReason(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
-                >
-                  <option value="RESTOCK">{t.reasonRestock}</option>
-                  <option value="PHYSICAL_AUDIT">{t.reasonAudit}</option>
-                  <option value="DAMAGED">{t.reasonDamaged}</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {t.notes}
-                </label>
-                <input
-                  type="text"
-                  value={adjustNotes}
-                  onChange={e => setAdjustNotes(e.target.value)}
-                  placeholder="Optional audit comment..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
+              {/* Modal Footer */}
+              <div className="shrink-0 flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
                 <button
                   type="button"
                   onClick={() => setAdjustingProduct(null)}
@@ -1304,145 +1309,155 @@ export default function GhostCrmDashboard() {
       {/* MODAL 2: COURIER SETTLEMENT                               */}
       {/* ======================================================== */}
       {settlingCourier && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto">
           <div
-            className="w-full max-w-lg rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
+            className="relative w-full max-w-lg my-auto rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[92vh] sm:max-h-[88vh]"
             dir={isRtl ? 'rtl' : 'ltr'}
           >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between bg-emerald-600 dark:bg-emerald-700 px-5 py-4">
-              <div className="flex items-center gap-2.5">
-                <WalletIcon className="w-5 h-5 text-white" />
-                <div>
-                  <h3 className="text-sm font-bold text-white">{t.settleModalTitle}</h3>
-                  <p className="text-[11px] text-emerald-100 font-medium">{settlingCourier.name}</p>
+            {/* Modal Header — Pinned at Top */}
+            <div className="shrink-0 flex items-center justify-between bg-emerald-600 dark:bg-emerald-700 px-4 sm:px-5 py-3.5 border-b border-emerald-500/30 z-10">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <WalletIcon className="w-5 h-5 text-white shrink-0" />
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate">{t.settleModalTitle}</h3>
+                  <p className="text-[11px] text-emerald-100 font-medium truncate">{settlingCourier.name}</p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setSettlingCourier(null)}
-                className="text-white/80 hover:text-white text-base cursor-pointer transition"
+                className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 text-base cursor-pointer transition shrink-0"
+                aria-label="Close"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleSettlementSubmit} className="p-5 space-y-4">
-              {/* Incremental Multi-Run Notice */}
-              {settlingCourier.settledOrdersToday && settlingCourier.settledOrdersToday > 0 ? (
-                <div className="p-3.5 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800 text-xs text-indigo-950 dark:text-indigo-200 space-y-1">
-                  <div className="flex items-center justify-between font-bold">
-                    <span className="flex items-center gap-1.5">
-                      <span>🔄</span>
-                      <span>{t.additionalRunNotice || 'סבב נוסף להיום'}</span>
-                    </span>
-                    <span className="text-[11px] font-mono bg-white/80 dark:bg-slate-900 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-700">
-                      {settlingCourier.settledOrdersToday} {t.ordersDelivered || 'משלוחים'} {t.reconciledEarlier || 'כבר נסגרו והועברו'}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
-                    ₪{Number(settlingCourier.settledCashToday || 0).toLocaleString()} כבר נמסרו למחסנאי בסגירה הקודמת. חישוב זה כולל <strong>אך ורק</strong> את המשלוחים החדשים מהסבב הנוכחי!
-                  </p>
-                </div>
-              ) : null}
-
-              {/* Row 1 — Orders today */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800">
-                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">
-                    {t.ordersToSettleCount || t.ordersCount}
-                  </p>
-                  <p className="text-2xl font-black text-slate-900 dark:text-white">{settleOrderCount}</p>
-                  {settlingCourier.totalOrdersToday && settlingCourier.totalOrdersToday > settleOrderCount ? (
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
-                      (מתוך {settlingCourier.totalOrdersToday} סה״כ היום)
+            {/* Modal Form with Scrollable Content Body */}
+            <form onSubmit={handleSettlementSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-4 overscroll-contain">
+                {/* Incremental Multi-Run Notice */}
+                {settlingCourier.settledOrdersToday && settlingCourier.settledOrdersToday > 0 ? (
+                  <div className="p-3 sm:p-3.5 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800 text-xs text-indigo-950 dark:text-indigo-200 space-y-1.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 font-bold">
+                      <span className="flex items-center gap-1.5">
+                        <span>🔄</span>
+                        <span>{t.additionalRunNotice || 'סבב נוסף להיום'}</span>
+                      </span>
+                      <span className="text-[11px] font-mono bg-white/80 dark:bg-slate-900 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-700 w-fit">
+                        {settlingCourier.settledOrdersToday} {t.ordersDelivered || 'משלוחים'} {t.reconciledEarlier || 'כבר נסגרו והועברו'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-indigo-700 dark:text-indigo-300 leading-relaxed">
+                      ₪{Number(settlingCourier.settledCashToday || 0).toLocaleString()} כבר נמסרו למחסנאי בסגירה הקודמת. חישוב זה כולל <strong>אך ורק</strong> את המשלוחים החדשים מהסבב הנוכחי!
                     </p>
-                  ) : null}
-                </div>
-                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800">
-                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">{t.deliveryFeesBreakdown}</p>
-                  <p className="text-sm text-slate-700 dark:text-slate-300 font-semibold">
-                    {settleOrderCount} × ₪100 = <span className="text-emerald-600 dark:text-emerald-400 font-black">₪{previewDeliveryFees.toLocaleString()}</span>
-                  </p>
-                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">(Bat Yam adjusted on confirm)</p>
-                </div>
-              </div>
-
-              {/* Row 2 — Gross cash collected */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {t.grossCollected}
-                  <span className="ml-1.5 text-slate-400 dark:text-slate-500 font-normal text-[10px]">({t.grossCollectedHint})</span>
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
-                  required
-                  value={grossInput}
-                  onChange={e => setGrossInput(e.target.value)}
-                  placeholder="e.g. 1200"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-base font-bold font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                />
-              </div>
-
-              {/* Row 3 — Manual bonus */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {t.bonusAmount}
-                  <span className="ml-1.5 text-slate-400 dark:text-slate-500 font-normal text-[10px]">({t.bonusHint})</span>
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
-                  value={bonusInput}
-                  onChange={e => setBonusInput(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-base font-bold font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                />
-              </div>
-
-              {/* Computed Summary Panel */}
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <div className="bg-slate-50 dark:bg-slate-900/60 px-4 py-2.5 flex items-center justify-between border-b border-slate-200 dark:border-slate-700">
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t.courierEarns}</span>
-                  <span className="text-base font-black text-emerald-600 dark:text-emerald-400 font-mono">₪{previewCourierPay.toLocaleString()}</span>
-                </div>
-                <div className={`px-4 py-3 flex items-center justify-between ${
-                  parsedGross > 0
-                    ? 'bg-amber-50 dark:bg-amber-500/10'
-                    : 'bg-slate-50 dark:bg-slate-900/40'
-                }`}>
-                  <div>
-                    <p className="text-xs font-bold text-slate-700 dark:text-slate-300">{t.netToWarehouse}</p>
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500">{t.netToWarehouseHint}</p>
                   </div>
-                  <span className={`text-xl font-black font-mono ${
-                    parsedGross > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'
+                ) : null}
+
+                {/* Row 1 — Orders today */}
+                <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800">
+                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5 truncate">
+                      {t.ordersToSettleCount || t.ordersCount}
+                    </p>
+                    <p className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">{settleOrderCount}</p>
+                    {settlingCourier.totalOrdersToday && settlingCourier.totalOrdersToday > settleOrderCount ? (
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 truncate">
+                        (מתוך {settlingCourier.totalOrdersToday} סה״כ היום)
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800">
+                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5 truncate">
+                      {t.deliveryFeesBreakdown}
+                    </p>
+                    <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 font-semibold truncate">
+                      {settleOrderCount} × ₪100 = <span className="text-emerald-600 dark:text-emerald-400 font-black">₪{previewDeliveryFees.toLocaleString()}</span>
+                    </p>
+                    <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 truncate">
+                      (Bat Yam adjusted on confirm)
+                    </p>
+                  </div>
+                </div>
+
+                {/* Row 2 — Gross cash collected */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    {t.grossCollected}
+                    <span className="ml-1.5 text-slate-400 dark:text-slate-500 font-normal text-[10px]">({t.grossCollectedHint})</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    required
+                    value={grossInput}
+                    onChange={e => setGrossInput(e.target.value)}
+                    placeholder="e.g. 1200"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-base font-bold font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  />
+                </div>
+
+                {/* Row 3 — Manual bonus */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    {t.bonusAmount}
+                    <span className="ml-1.5 text-slate-400 dark:text-slate-500 font-normal text-[10px]">({t.bonusHint})</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={bonusInput}
+                    onChange={e => setBonusInput(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-base font-bold font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  />
+                </div>
+
+                {/* Computed Summary Panel */}
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                  <div className="bg-slate-50 dark:bg-slate-900/60 px-4 py-2.5 flex items-center justify-between border-b border-slate-200 dark:border-slate-700">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t.courierEarns}</span>
+                    <span className="text-base font-black text-emerald-600 dark:text-emerald-400 font-mono">₪{previewCourierPay.toLocaleString()}</span>
+                  </div>
+                  <div className={`px-4 py-3 flex items-center justify-between ${
+                    parsedGross > 0
+                      ? 'bg-amber-50 dark:bg-amber-500/10'
+                      : 'bg-slate-50 dark:bg-slate-900/40'
                   }`}>
-                    ₪{previewNet.toLocaleString()}
-                  </span>
+                    <div>
+                      <p className="text-xs font-bold text-slate-700 dark:text-slate-300">{t.netToWarehouse}</p>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500">{t.netToWarehouseHint}</p>
+                    </div>
+                    <span className={`text-xl font-black font-mono ${
+                      parsedGross > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'
+                    }`}>
+                      ₪{previewNet.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">{t.notes}</label>
+                  <input
+                    type="text"
+                    value={settlementNotes}
+                    onChange={e => setSettlementNotes(e.target.value)}
+                    placeholder="Optional shift notes..."
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  />
+                </div>
+
+                {/* Telegram Notice */}
+                <div className="flex items-start gap-2 text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/40 rounded-xl px-3.5 py-2.5 border border-slate-100 dark:border-slate-800">
+                  <span className="text-base leading-none mt-0.5 shrink-0">📲</span>
+                  <span>Telegram receipts will be sent to the courier and the admin group automatically.</span>
                 </div>
               </div>
 
-              {/* Notes */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">{t.notes}</label>
-                <input
-                  type="text"
-                  value={settlementNotes}
-                  onChange={e => setSettlementNotes(e.target.value)}
-                  placeholder="Optional shift notes..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                />
-              </div>
-
-              {/* Telegram Notice */}
-              <div className="flex items-start gap-2 text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/40 rounded-xl px-3.5 py-2.5 border border-slate-100 dark:border-slate-800">
-                <span className="text-base leading-none mt-0.5">📲</span>
-                <span>Telegram receipts will be sent to the courier and the admin group automatically.</span>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-1">
+              {/* Modal Footer — Pinned at Bottom */}
+              <div className="shrink-0 flex items-center justify-end gap-2 px-4 sm:px-5 py-3 bg-slate-50 dark:bg-slate-900/90 border-t border-slate-100 dark:border-slate-800 z-10">
                 <button
                   type="button"
                   onClick={() => setSettlingCourier(null)}
