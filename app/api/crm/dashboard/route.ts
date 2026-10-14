@@ -698,10 +698,10 @@ export async function POST(req: Request) {
           }
         }
 
-        // Also match known warehouse names (e.g., soso / מחסנאי)
+        // Also match known warehouse keywords in roster (e.g. מחסנאי / warehouse)
         for (const r of crmRoster || []) {
           const lowerName = (r.name || '').toLowerCase()
-          if (lowerName.includes('soso') || lowerName.includes('מחסנאי') || lowerName.includes('warehouse')) {
+          if (lowerName.includes('מחסנאי') || lowerName.includes('warehouse')) {
             if (r.telegram_id) {
               warehouseTelegramIds.add(String(r.telegram_id).trim())
             }
@@ -709,6 +709,11 @@ export async function POST(req: Request) {
         }
       } catch (lookupErr) {
         console.warn('[CRM API] Error querying warehouse workers for Telegram receipt:', lookupErr)
+      }
+
+      // Safeguard: The courier being settled must NEVER receive the storekeeper's collection alert
+      if (courierTgId) {
+        warehouseTelegramIds.delete(String(courierTgId).trim())
       }
 
       // ── Message to COURIER ──────────────────────────────────────────────────
@@ -1062,10 +1067,10 @@ export async function POST(req: Request) {
           }
         }
 
-        // Match roster for soso / warehouse
+        // Match roster for warehouse
         for (const r of crmRoster || []) {
           const lowerName = (r.name || '').toLowerCase()
-          if (lowerName.includes('soso') || lowerName.includes('מחסנאי') || lowerName.includes('warehouse')) {
+          if (lowerName.includes('מחסנאי') || lowerName.includes('warehouse')) {
             if (r.telegram_id) warehouseTelegramIds.add(String(r.telegram_id).trim())
           }
         }
