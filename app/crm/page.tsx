@@ -92,6 +92,7 @@ interface Courier {
   totalCashToday?: number
   settledOrdersToday?: number
   settledCashToday?: number
+  settledNetCashToday?: number
   pendingOrdersToday?: number
   pendingCashToday?: number
   isSettledToday?: boolean
@@ -1349,7 +1350,7 @@ export default function GhostCrmDashboard() {
                       </span>
                     </div>
                     <p className="text-[11px] text-indigo-700 dark:text-indigo-300 leading-relaxed">
-                      ₪{Number(settlingCourier.settledCashToday || 0).toLocaleString()} כבר נמסרו למחסנאי בסגירה הקודמת. חישוב זה כולל <strong>אך ורק</strong> את המשלוחים החדשים מהסבב הנוכחי!
+                      ₪{Number(settlingCourier.settledNetCashToday || settlingCourier.settledCashToday || 0).toLocaleString()} (נטו) כבר נמסרו למחסנאי בסגירה הקודמת. חישוב זה כולל <strong>אך ורק</strong> את המשלוחים החדשים מהסבב הנוכחי!
                     </p>
                   </div>
                 ) : null}

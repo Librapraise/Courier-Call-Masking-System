@@ -297,6 +297,22 @@ export async function GET() {
       }
     })
 
+    // Fetch today's cash settlements to compute exact net handed to warehouseman per courier
+    const { data: todaySettlements } = await supabaseAdmin
+      .from('cash_settlements')
+      .select('courier_id, amount_received, net_expected, gross_collected')
+      .gte('created_at', shiftStartIso)
+      .eq('status', 'SETTLED')
+
+    const courierSettledNetMap: Record<string, number> = {}
+    ;(todaySettlements || []).forEach(s => {
+      const cId = s.courier_id
+      if (cId) {
+        const net = Number(s.amount_received ?? s.net_expected ?? 0)
+        courierSettledNetMap[cId] = (courierSettledNetMap[cId] || 0) + net
+      }
+    })
+
     const couriers = (couriersData || []).map(c => {
       const s = courierSummaryMap[c.id] || {
         totalCashToday: 0,
@@ -319,6 +335,7 @@ export async function GET() {
         totalCashToday: s.totalCashToday,
         settledOrdersToday: s.settledOrdersToday,
         settledCashToday: s.settledCashToday,
+        settledNetCashToday: courierSettledNetMap[c.id] || 0,
         pendingOrdersToday: s.pendingOrdersToday,
         pendingCashToday: s.pendingCashToday,
         isSettledToday,
@@ -580,6 +597,21 @@ export async function POST(req: Request) {
       const earlierSettledTotal = (earlierSettledOrders || []).reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
       const isAdditionalRun = earlierCount > 0
 
+      // Query actual net cash previously received by warehouse from this courier today
+      const todayDateStr = new Date().toISOString().split('T')[0]
+      const { data: earlierSettlements } = await supabaseAdmin
+        .from('cash_settlements')
+        .select('amount_received, net_expected, gross_collected')
+        .eq('courier_id', courierId)
+        .eq('status', 'SETTLED')
+        .or(`settlement_date.eq.${todayDateStr},created_at.gte.${todayIso}`)
+
+      const earlierNetToWarehouse = (earlierSettlements || []).reduce(
+        (sum, s) => sum + (Number(s.amount_received ?? s.net_expected ?? 0)),
+        0
+      )
+      const displayEarlierNet = earlierNetToWarehouse > 0 ? earlierNetToWarehouse : earlierSettledTotal
+
       // Bat Yam = ₪50/delivery, all others = ₪100/delivery
       const BAT_YAM_FEE = 50
       const STANDARD_FEE = 100
@@ -609,7 +641,7 @@ export async function POST(req: Request) {
       // Record the full financial breakdown in cash_settlements
       const settlementNotes = notes || (
         isAdditionalRun
-          ? `סגירת קופה (סבב נוסף) — ${orders.length} משלוחים בסבב זה | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse} (נסגרו מוקדם יותר: ${earlierCount} משלוחים / ₪${earlierSettledTotal})`
+          ? `סגירת קופה (סבב נוסף) — ${orders.length} משלוחים בסבב זה | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse} (נסגרו מוקדם יותר: ${earlierCount} משלוחים / נטו ₪${displayEarlierNet.toLocaleString()})`
           : `סגירת קופה — ${orders.length} משלוחים | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse}`
       )
 
@@ -742,7 +774,7 @@ export async function POST(req: Request) {
         `📊 *עמלת השליח שנוכתה:* ₪${courierPay.toLocaleString()}` + (bonus > 0 ? ` (כולל בונוס ₪${bonus})` : '') + `\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         `💵 *עליך לגבות כעת מ${courierName}: ₪${netToWarehouse.toLocaleString()} במזומן!*` +
-        (isAdditionalRun ? `\n\nℹ️ _הערה: ${earlierCount} משלוחים קודמים (₪${earlierSettledTotal}) כבר הועברו מוקדם יותר היום._` : '')
+        (isAdditionalRun ? `\n\nℹ️ _הערה: ${earlierCount} משלוחים קודמים (נטו ₪${displayEarlierNet.toLocaleString()}) כבר הועברו מוקדם יותר היום._` : '')
 
       // ── Message to WAREHOUSE WORKERS ONLY (Storekeeper Physical Collection) ─
       // NOTE: The accountant / dispatchers must NOT receive this collection message.

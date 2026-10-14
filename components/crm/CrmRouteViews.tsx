@@ -55,6 +55,7 @@ export interface Courier {
   totalCashToday?: number
   settledOrdersToday?: number
   settledCashToday?: number
+  settledNetCashToday?: number
   pendingOrdersToday?: number
   pendingCashToday?: number
   isSettledToday?: boolean
