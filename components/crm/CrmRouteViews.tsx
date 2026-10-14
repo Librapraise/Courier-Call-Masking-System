@@ -71,6 +71,7 @@ export interface Order {
   total_price: number
   is_settled: boolean
   order_date: string
+  courier_id?: string | null
   raw_message?: string
   crm_customers?: Customer
   brands?: Brand
@@ -1209,6 +1210,31 @@ export interface CashSettlementRecord {
   }
 }
 
+export interface DayCloseoutRecord {
+  id: string
+  closeout_date: string
+  shift_start: string
+  shift_end: string
+  total_orders: number
+  gross_collected: number
+  total_courier_pay: number
+  total_bonus: number
+  net_to_safe: number
+  courier_breakdown?: Array<{
+    courier_id: string
+    courier_name: string
+    orders_count: number
+    gross_collected: number
+    courier_fee: number
+    bonus?: number
+    net_to_safe: number
+  }>
+  notes?: string
+  closed_by?: string
+  closed_by_name?: string
+  created_at: string
+}
+
 export function SettlementsRouteView({
   couriers,
   metrics,
@@ -1220,7 +1246,11 @@ export function SettlementsRouteView({
   onOpenAddCourier,
   onOpenEditCourier,
   onOpenDeleteCourier,
-  recentSettlements
+  recentSettlements,
+  onOpenDayCloseout,
+  recentDayCloseouts,
+  latestDayCloseout,
+  onViewDayCloseoutDetail
 }: {
   couriers: Courier[]
   metrics: DashboardMetrics
@@ -1233,6 +1263,10 @@ export function SettlementsRouteView({
   onOpenEditCourier?: (c: Courier) => void
   onOpenDeleteCourier?: (c: Courier) => void
   recentSettlements?: CashSettlementRecord[]
+  onOpenDayCloseout?: () => void
+  recentDayCloseouts?: DayCloseoutRecord[]
+  latestDayCloseout?: DayCloseoutRecord | null
+  onViewDayCloseoutDetail?: (record: DayCloseoutRecord) => void
 }) {
   return (
     <div className="space-y-6">
@@ -1242,16 +1276,29 @@ export function SettlementsRouteView({
           <h2 className="text-base font-bold text-slate-900 dark:text-white">{t.settlementTitle}</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Daily physical cash reconciliation & courier roster</p>
         </div>
-        {onOpenAddCourier && (
-          <button
-            type="button"
-            onClick={onOpenAddCourier}
-            className="px-3.5 py-2 rounded-xl bg-[#4352E8] hover:bg-[#3442cb] text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
-          >
-            <PlusIcon className="w-4 h-4" />
-            <span>Add Courier</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {onOpenDayCloseout && (
+            <button
+              type="button"
+              onClick={onOpenDayCloseout}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white text-xs font-black transition shadow-md shadow-emerald-500/20 flex items-center gap-2 cursor-pointer shrink-0"
+              title="סגירת יום עבודה ואיפוס ליום חדש למחר"
+            >
+              <span className="text-base leading-none">🌙</span>
+              <span>{t.closeDayBtn || 'Close Day (Z-Report)'}</span>
+            </button>
+          )}
+          {onOpenAddCourier && (
+            <button
+              type="button"
+              onClick={onOpenAddCourier}
+              className="px-3.5 py-2 rounded-xl bg-[#4352E8] hover:bg-[#3442cb] text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+            >
+              <PlusIcon className="w-4 h-4" />
+              <span>Add Courier</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Settlements KPI Summary Bar */}
@@ -1554,6 +1601,93 @@ export function SettlementsRouteView({
             {isRtl
               ? 'טרם בוצעו סגירות קופה היום. כאשר מנהל/סדרן סוגר קופה לשליח, ההתראה תופיע כאן וכל פרטי הגבייה יישמרו ביומן זה.'
               : 'No shifts closed out yet today. When a shift is closed, storekeeper collection notices and handover receipts will record here.'}
+          </div>
+        )}
+      </div>
+
+      {/* Daily Closeout Reports History (Z-Reports) */}
+      <div className="rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden space-y-3 p-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-base">🌙</span>
+            <div>
+              <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                {t.pastCloseoutsTitle || 'יומן דוחות סגירת יום (Z-Reports)'}
+              </h4>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                {isRtl ? 'היסטוריית סגירות יום רשמיות ודוחות שנשלחו למחסנאי ולהנהלת חשבונות' : 'Official shift closeouts dispatched to warehouseman and accounting'}
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+            {recentDayCloseouts && recentDayCloseouts.length > 0
+              ? `${recentDayCloseouts.length} ${isRtl ? 'סגירות יום מתועדות' : 'daily closeouts logged'}`
+              : (t.noCloseoutsYet || 'No previous closeouts')}
+          </span>
+        </div>
+
+        {recentDayCloseouts && recentDayCloseouts.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse" dir={isRtl ? 'rtl' : 'ltr'}>
+              <thead>
+                <tr className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-100 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  <th className="py-3 px-3">תאריך ושעה / Time</th>
+                  <th className="py-3 px-3">נסגר ע״י / Manager</th>
+                  <th className="py-3 px-3">משלוחים / Orders</th>
+                  <th className="py-3 px-3">מחזור ברוטו / Gross</th>
+                  <th className="py-3 px-3">עמלות שליחים / Fees</th>
+                  <th className="py-3 px-3">נטו בעסק / Net Safe</th>
+                  <th className="py-3 px-4">הערות / Notes</th>
+                  <th className="py-3 px-3 text-center">דוח מלא / Report</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-xs">
+                {recentDayCloseouts.map(co => (
+                  <tr key={co.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                    <td className="py-3 px-3 font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                      {new Date(co.shift_end || co.created_at).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </td>
+                    <td className="py-3 px-3 font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                      {co.closed_by_name || 'מנהל'}
+                    </td>
+                    <td className="py-3 px-3 font-bold text-slate-700 dark:text-slate-300">
+                      {co.total_orders}
+                    </td>
+                    <td className="py-3 px-3 font-mono font-bold text-slate-700 dark:text-slate-300">
+                      ₪{Number(co.gross_collected || 0).toLocaleString()}
+                    </td>
+                    <td className="py-3 px-3 font-mono text-amber-600 dark:text-amber-400 font-bold">
+                      -₪{Number(co.total_courier_pay || 0).toLocaleString()}
+                    </td>
+                    <td className="py-3 px-3 font-mono font-extrabold text-sm text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                      ₪{Number(co.net_to_safe || 0).toLocaleString()}
+                    </td>
+                    <td className="py-3 px-4 text-[11px] text-slate-500 dark:text-slate-400 max-w-xs truncate" title={co.notes || ''}>
+                      {co.notes || '—'}
+                    </td>
+                    <td className="py-3 px-3 text-center whitespace-nowrap">
+                      {onViewDayCloseoutDetail ? (
+                        <button
+                          type="button"
+                          onClick={() => onViewDayCloseoutDetail(co)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition cursor-pointer"
+                        >
+                          {isRtl ? 'צפה בפירוט' : 'View Breakdown'}
+                        </button>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="py-6 text-center text-xs text-slate-400 dark:text-slate-500">
+            {isRtl
+              ? 'טרם בוצעה סגירת יום. כאשר תלחץ על "סגירת יום (דוח Z)", הדוח המלא יישמר כאן ויישלח אוטומטית למחסנאי ולהנהלת חשבונות.'
+              : 'No previous day closeouts yet. When you click "Close Day (Z-Report)", full audit reports will record here.'}
           </div>
         )}
       </div>

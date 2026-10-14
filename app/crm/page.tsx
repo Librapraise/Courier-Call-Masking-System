@@ -49,7 +49,8 @@ import {
   SettlementsRouteView,
   CustomersRouteView,
   TelegramRouteView,
-  CashSettlementRecord
+  CashSettlementRecord,
+  DayCloseoutRecord
 } from '@/components/crm/CrmRouteViews'
 import { CrmSettingsView } from '@/components/crm/CrmSettingsView'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -107,6 +108,7 @@ interface Order {
   total_price: number
   is_settled: boolean
   order_date: string
+  courier_id?: string | null
   raw_message?: string
   crm_customers?: Customer
   brands?: Brand
@@ -257,6 +259,15 @@ export default function GhostCrmDashboard() {
   const [parsedTestResult, setParsedTestResult] = useState<ParsedDeliveryOrder | null>(null)
   const [recentSettlements, setRecentSettlements] = useState<CashSettlementRecord[]>([])
   const [dismissedSettlementIds, setDismissedSettlementIds] = useState<string[]>([])
+
+  // Day Closeout (Z-Report) States
+  const [recentDayCloseouts, setRecentDayCloseouts] = useState<DayCloseoutRecord[]>([])
+  const [latestDayCloseout, setLatestDayCloseout] = useState<DayCloseoutRecord | null>(null)
+  const [shiftStartTime, setShiftStartTime] = useState<string | null>(null)
+  const [showDayCloseoutModal, setShowDayCloseoutModal] = useState<boolean>(false)
+  const [selectedCloseoutDetail, setSelectedCloseoutDetail] = useState<DayCloseoutRecord | null>(null)
+  const [isSubmittingDayCloseout, setIsSubmittingDayCloseout] = useState<boolean>(false)
+  const [dayCloseoutNotes, setDayCloseoutNotes] = useState<string>('')
 
   // Translations
   const t = useMemo(() => TRANSLATIONS[lang], [lang])
@@ -525,6 +536,15 @@ export default function GhostCrmDashboard() {
       if (data.recentSettlements) {
         setRecentSettlements(data.recentSettlements)
       }
+      if (data.recentDayCloseouts) {
+        setRecentDayCloseouts(data.recentDayCloseouts)
+      }
+      if (data.latestDayCloseout !== undefined) {
+        setLatestDayCloseout(data.latestDayCloseout)
+      }
+      if (data.shiftStartTime) {
+        setShiftStartTime(data.shiftStartTime)
+      }
     } catch (err) {
       console.error('[GhostCRM] Fetch error:', err)
     } finally {
@@ -603,6 +623,82 @@ export default function GhostCrmDashboard() {
     return brands.filter(b => b.name.toLowerCase().includes(term))
   }, [brands, brandSearchTerm])
 
+  // Active Shift Orders Calculation (since last day closeout or today's start)
+  const activeShiftOrders = useMemo(() => {
+    if (shiftStartTime) {
+      return orders.filter(o => o.order_date > shiftStartTime)
+    }
+    const todayStr = new Date().toISOString().split('T')[0]
+    return orders.filter(o => {
+      const d = o.order_date || ''
+      return d.startsWith(todayStr) || (d && new Date(d).toDateString() === new Date().toDateString())
+    })
+  }, [orders, shiftStartTime])
+
+  // End-of-Day Closeout (Z-Report) Live Preview Computation
+  const dayCloseoutPreview = useMemo(() => {
+    const activeOrders = activeShiftOrders || []
+    const STANDARD_FEE = 100
+    const BAT_YAM_FEE = 120
+
+    const map = new Map<string, {
+      courier_id: string
+      courier_name: string
+      orders_count: number
+      gross_collected: number
+      courier_fee: number
+      net_to_safe: number
+    }>()
+
+    for (const o of activeOrders) {
+      const c = o.crm_couriers
+      const cId = c?.id || o.courier_id || 'unassigned'
+      const cName = c?.name || (cId === 'unassigned' ? (isRtl ? 'ללא שליח' : 'Unassigned') : 'שליח')
+
+      if (!map.has(cId)) {
+        map.set(cId, {
+          courier_id: cId,
+          courier_name: cName,
+          orders_count: 0,
+          gross_collected: 0,
+          courier_fee: 0,
+          net_to_safe: 0
+        })
+      }
+
+      const entry = map.get(cId)!
+      entry.orders_count += 1
+      const price = Number(o.total_price) || 0
+      entry.gross_collected += price
+
+      if (cId !== 'unassigned') {
+        const isBatYam = (o.city || '').includes('בת ים') || (o.address || '').includes('בת ים')
+        entry.courier_fee += isBatYam ? BAT_YAM_FEE : STANDARD_FEE
+      }
+    }
+
+    let totalGross = 0
+    let totalCourierPay = 0
+    const couriersList: any[] = []
+
+    map.forEach((entry) => {
+      entry.net_to_safe = Math.max(0, entry.gross_collected - entry.courier_fee)
+      totalGross += entry.gross_collected
+      totalCourierPay += entry.courier_fee
+      couriersList.push(entry)
+    })
+
+    const netToSafe = Math.max(0, totalGross - totalCourierPay)
+
+    return {
+      totalOrders: activeOrders.length,
+      totalGross,
+      totalCourierPay,
+      netToSafe,
+      couriersList
+    }
+  }, [activeShiftOrders, isRtl])
+
   // Filtered Orders Calculation
   const filteredOrders = useMemo(() => {
     const query = searchQuery.toLowerCase().trim()
@@ -611,11 +707,15 @@ export default function GhostCrmDashboard() {
     return orders.filter(order => {
       // Shift filter
       if (todayOnly) {
-        const orderDateStr = order.order_date || ''
-        const isToday =
-          orderDateStr.startsWith(todayStr) ||
-          (orderDateStr && new Date(orderDateStr).toDateString() === new Date().toDateString())
-        if (!isToday) return false
+        if (shiftStartTime) {
+          if (order.order_date <= shiftStartTime) return false
+        } else {
+          const orderDateStr = order.order_date || ''
+          const isToday =
+            orderDateStr.startsWith(todayStr) ||
+            (orderDateStr && new Date(orderDateStr).toDateString() === new Date().toDateString())
+          if (!isToday) return false
+        }
       }
 
       // Settlement filter
@@ -875,6 +975,37 @@ export default function GhostCrmDashboard() {
       alert(err.message)
     } finally {
       setIsSubmittingSettle(false)
+    }
+  }
+
+  // End-of-Day Shift Closeout (Z-Report) Submit
+  const handleDayCloseoutSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      setIsSubmittingDayCloseout(true)
+      const res = await fetch('/api/crm/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'CLOSE_DAY',
+          notes: dayCloseoutNotes
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to close day')
+
+      setShowDayCloseoutModal(false)
+      setDayCloseoutNotes('')
+      setNotification(
+        isRtl
+          ? `יום העבודה נסגר בהצלחה! הדוחות נשלחו בטלגרם למחסנאי (${data.warehouseSent || 0}) ולמנהל החשבונות (${data.accountantSent || 0}). הקופה אופסה לקראת מחר.`
+          : `Day shift closed! Reports sent to warehouseman (${data.warehouseSent || 0}) and accountant (${data.accountantSent || 0}). Register reset for tomorrow.`
+      )
+      fetchData()
+    } catch (err: any) {
+      alert(err.message)
+    } finally {
+      setIsSubmittingDayCloseout(false)
     }
   }
 
@@ -1406,6 +1537,337 @@ export default function GhostCrmDashboard() {
                 ) : (
                   <span>Yes, Purge Demo Orders</span>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL 4: END-OF-DAY CLOSEOUT (Z-REPORT) MODAL             */}
+      {/* ======================================================== */}
+      {showDayCloseoutModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto animate-in fade-in">
+          <div
+            className="w-full max-w-2xl rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-5 my-8"
+            dir={isRtl ? 'rtl' : 'ltr'}
+          >
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 text-xl shrink-0">
+                  🌙
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                    {t.closeDayModalTitle || 'סגירת יום עבודה ודוח סוף יום (Z-Report)'}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {t.closeDayModalSubtitle || 'סגירת הקופה היומית, איפוס ליום חדש למחר, ושליחת דוחות מפורטים למחסנאי ולהנהלת חשבונות.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDayCloseoutModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                <XIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Financial Overview Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/70 dark:border-slate-800 space-y-1">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  {t.totalGrossDay || 'סך גבייה ברוטו'}
+                </span>
+                <p className="text-xl font-black font-mono text-slate-900 dark:text-white">
+                  ₪{dayCloseoutPreview.totalGross.toLocaleString()}
+                </p>
+                <p className="text-[10px] text-slate-400 font-medium">
+                  {dayCloseoutPreview.totalOrders} {isRtl ? 'משלוחים שסופקו' : 'orders delivered'}
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 space-y-1">
+                <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                  {t.totalCourierFeesDay || 'עמלות שליחים'}
+                </span>
+                <p className="text-xl font-black font-mono text-amber-600 dark:text-amber-400">
+                  -₪{dayCloseoutPreview.totalCourierPay.toLocaleString()}
+                </p>
+                <p className="text-[10px] text-amber-600/70 dark:text-amber-400/60 font-medium">
+                  {isRtl ? '₪100 רגיל / ₪120 בת ים' : '₪100 std / ₪120 Bat Yam'}
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1 shadow-xs">
+                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">
+                  {t.netToBusinessDay || 'נטו נשאר בכספת / בעסק'}
+                </span>
+                <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+                  ₪{dayCloseoutPreview.netToSafe.toLocaleString()}
+                </p>
+                <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/70 font-medium">
+                  {isRtl ? 'מזומן פיזי להפקדה' : 'Physical cash to vault'}
+                </p>
+              </div>
+            </div>
+
+            {/* Courier Breakdown Table */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                  {t.couriersSummaryTable || 'פירוט לפי שליחים'}
+                </h4>
+                <span className="text-[11px] text-slate-400">
+                  {dayCloseoutPreview.couriersList.length} {isRtl ? 'שליחים פעילים' : 'active couriers'}
+                </span>
+              </div>
+              <div className="max-h-48 overflow-y-auto border border-slate-200/80 dark:border-slate-800 rounded-xl">
+                <table className="w-full text-left border-collapse text-xs" dir={isRtl ? 'rtl' : 'ltr'}>
+                  <thead className="bg-slate-50 dark:bg-slate-900/80 sticky top-0 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 uppercase">
+                    <tr>
+                      <th className="py-2.5 px-3">שליח / Courier</th>
+                      <th className="py-2.5 px-3 text-center">משלוחים</th>
+                      <th className="py-2.5 px-3">גבייה ברוטו</th>
+                      <th className="py-2.5 px-3">עמלת שליח</th>
+                      <th className="py-2.5 px-3 font-extrabold text-emerald-600 dark:text-emerald-400">נטו לכספת</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                    {dayCloseoutPreview.couriersList.length > 0 ? (
+                      dayCloseoutPreview.couriersList.map(c => (
+                        <tr key={c.courier_id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                          <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white">
+                            {c.courier_name}
+                          </td>
+                          <td className="py-2.5 px-3 text-center text-slate-600 dark:text-slate-300">
+                            {c.orders_count}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-slate-700 dark:text-slate-300">
+                            ₪{c.gross_collected.toLocaleString()}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-amber-600 dark:text-amber-400">
+                            -₪{c.courier_fee.toLocaleString()}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                            ₪{c.net_to_safe.toLocaleString()}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-xs text-slate-400">
+                          {isRtl ? 'אין משלוחים פעילים במשמרת זו' : 'No active deliveries in this shift'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleDayCloseoutSubmit} className="space-y-4">
+              {/* Optional Notes */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  {t.notes}
+                </label>
+                <input
+                  type="text"
+                  value={dayCloseoutNotes}
+                  onChange={e => setDayCloseoutNotes(e.target.value)}
+                  placeholder={t.dayCloseoutNotesPlaceholder || 'הערות סיכום יום (אופציונלי)...'}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                />
+              </div>
+
+              {/* Telegram Auto-Dispatch Indicator Cards */}
+              <div className="space-y-2 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200/70 dark:border-slate-800">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                  {t.notifiedParties || 'נמעני דוחות אוטומטיים בטלגרם:'}
+                </span>
+                <div className="space-y-1.5 text-xs">
+                  <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                    <span className="text-base leading-none">📦</span>
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                      {t.warehouseReportBadge || 'מחסנאי: דוח מעטפות מזומן והפקדה לכספת'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                    <span className="text-base leading-none">📊</span>
+                    <span className="font-semibold text-indigo-600 dark:text-indigo-400">
+                      {t.accountingReportBadge || 'מנהל חשבונות: דוח פיננסי מלא (הכנסות, עמלות, רווח נטו)'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowDayCloseoutModal(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+                >
+                  {t.cancel}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingDayCloseout}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white text-xs font-black transition shadow-lg shadow-emerald-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmittingDayCloseout ? (
+                    <>
+                      <RefreshIcon className="w-4 h-4 animate-spin text-white" />
+                      <span>{isRtl ? 'סוגר משמרת ושולח דוחות...' : 'Closing shift & dispatching...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🌙</span>
+                      <span>{t.confirmCloseDay || 'אשר סגירת יום ושלח דוחות'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL 5: PAST CLOSEOUT DETAIL (Z-REPORT AUDIT BREAKDOWN)  */}
+      {/* ======================================================== */}
+      {selectedCloseoutDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto animate-in fade-in">
+          <div
+            className="w-full max-w-2xl rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-5 my-8"
+            dir={isRtl ? 'rtl' : 'ltr'}
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 text-lg">
+                  📑
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    {isRtl ? 'דוח סגירת יום מפורט (Z-Report)' : 'Day Closeout Audit Breakdown'}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                    {new Date(selectedCloseoutDetail.shift_end || selectedCloseoutDetail.created_at).toLocaleString([], {
+                      year: 'numeric',
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })} • {isRtl ? 'נסגר ע״י' : 'Closed by'}: {selectedCloseoutDetail.closed_by_name || 'מנהל'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCloseoutDetail(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                <XIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Financial Summary */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/70 dark:border-slate-800 space-y-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase">ברוטו שנגבה</span>
+                <p className="text-lg font-black font-mono text-slate-900 dark:text-white">
+                  ₪{Number(selectedCloseoutDetail.gross_collected || 0).toLocaleString()}
+                </p>
+                <p className="text-[10px] text-slate-400 font-medium">
+                  {selectedCloseoutDetail.total_orders} {isRtl ? 'משלוחים' : 'orders'}
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 space-y-1">
+                <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase">עמלות שליחים</span>
+                <p className="text-lg font-black font-mono text-amber-600 dark:text-amber-400">
+                  -₪{Number(selectedCloseoutDetail.total_courier_pay || 0).toLocaleString()}
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1">
+                <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase">נטו נשאר בכספת</span>
+                <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+                  ₪{Number(selectedCloseoutDetail.net_to_safe || 0).toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            {/* Breakdown Table */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                פירוט לפי שליחים
+              </h4>
+              <div className="max-h-56 overflow-y-auto border border-slate-200/80 dark:border-slate-800 rounded-xl">
+                <table className="w-full text-left border-collapse text-xs" dir={isRtl ? 'rtl' : 'ltr'}>
+                  <thead className="bg-slate-50 dark:bg-slate-900/80 sticky top-0 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 uppercase">
+                    <tr>
+                      <th className="py-2 px-3">שליח</th>
+                      <th className="py-2 px-3 text-center">משלוחים</th>
+                      <th className="py-2 px-3">גבייה ברוטו</th>
+                      <th className="py-2 px-3">עמלת שליח</th>
+                      <th className="py-2 px-3 font-bold text-emerald-600">נטו לכספת</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                    {selectedCloseoutDetail.courier_breakdown && selectedCloseoutDetail.courier_breakdown.length > 0 ? (
+                      selectedCloseoutDetail.courier_breakdown.map((c: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                          <td className="py-2 px-3 font-bold text-slate-900 dark:text-white">
+                            {c.courier_name}
+                          </td>
+                          <td className="py-2 px-3 text-center text-slate-600 dark:text-slate-300">
+                            {c.orders_count}
+                          </td>
+                          <td className="py-2 px-3 font-mono text-slate-700 dark:text-slate-300">
+                            ₪{Number(c.gross_collected || 0).toLocaleString()}
+                          </td>
+                          <td className="py-2 px-3 font-mono text-amber-600 dark:text-amber-400">
+                            -₪{Number(c.courier_fee || 0).toLocaleString()}
+                          </td>
+                          <td className="py-2 px-3 font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                            ₪{Number(c.net_to_safe || 0).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={5} className="py-4 text-center text-xs text-slate-400">
+                          אין פירוט שליחים זמין
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Notes if any */}
+            {selectedCloseoutDetail.notes && (
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
+                <span className="font-bold text-slate-900 dark:text-white mr-1.5">הערות:</span>
+                {selectedCloseoutDetail.notes}
+              </div>
+            )}
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setSelectedCloseoutDetail(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+              >
+                סגור
               </button>
             </div>
           </div>
@@ -2176,6 +2638,16 @@ export default function GhostCrmDashboard() {
               <span>{lang === 'en' ? '🌐 עברית (RTL)' : '🌐 English (LTR)'}</span>
             </button>
 
+            {/* End-of-Day Shift Closeout (Z-Report) Action Button */}
+            <button
+              onClick={() => setShowDayCloseoutModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white text-xs font-black transition shadow-md shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer shrink-0"
+              title="סגירת יום עבודה (דוח Z) ואיפוס הקופה למחר"
+            >
+              <span className="text-sm">🌙</span>
+              <span>{t.closeDayBtn || 'Close Day (Z-Report)'}</span>
+            </button>
+
             {/* Quick Switch to /admin Courier Service & Masked Calling */}
             <Link
               href="/admin"
@@ -2359,6 +2831,10 @@ export default function GhostCrmDashboard() {
             }}
             onOpenDeleteCourier={(c) => setDeletingCourier(c)}
             recentSettlements={recentSettlements}
+            onOpenDayCloseout={() => setShowDayCloseoutModal(true)}
+            recentDayCloseouts={recentDayCloseouts}
+            latestDayCloseout={latestDayCloseout}
+            onViewDayCloseoutDetail={(co) => setSelectedCloseoutDetail(co)}
           />
         )}
 

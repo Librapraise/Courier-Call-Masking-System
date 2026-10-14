@@ -152,6 +152,24 @@ export const TRANSLATIONS = {
     courierPays: 'Courier pays warehouseman',
     warehousemanCollects: 'Warehouseman collects from courier',
 
+    // Day Closeout (Z-Report)
+    closeDayBtn: 'Close Day (Z-Report)',
+    closeDayModalTitle: 'End-of-Day Shift Closeout (Z-Report)',
+    closeDayModalSubtitle: 'Finalize today\'s register, reset for tomorrow, and dispatch reports to warehouseman and accounting manager.',
+    confirmCloseDay: 'Confirm Close Day & Dispatch Reports',
+    totalGrossDay: 'Total Gross Collected Today',
+    totalCourierFeesDay: 'Total Courier Fees Paid',
+    netToBusinessDay: 'Net Cash Left with Business / Safe',
+    activeShiftSummary: 'Active Shift Summary',
+    couriersSummaryTable: 'Courier Breakdown',
+    notifiedParties: 'Automated Reports Dispatch',
+    warehouseReportBadge: 'Warehouseman: Physical Cash & Safe Report',
+    accountingReportBadge: 'Accounting Manager: Full Financial Audit',
+    dayCloseoutSuccess: 'Day successfully closed! Reports dispatched to warehouseman and accounting manager. Register reset for tomorrow.',
+    dayCloseoutNotesPlaceholder: 'Optional day summary comments...',
+    pastCloseoutsTitle: 'Daily Closeout Reports History (Z-Reports)',
+    noCloseoutsYet: 'No previous day closeouts recorded yet.',
+
     // Empty state
     noRecordsFound: 'No customer orders match your search filters.',
     clearFilters: 'Clear All Filters',
@@ -307,6 +325,24 @@ export const TRANSLATIONS = {
     reconciledEarlier: 'כבר הועבר למחסנאי',
     courierPays: 'השליח משלם למחסנאי',
     warehousemanCollects: 'המחסנאי גובה מהשליח',
+
+    // Day Closeout (Z-Report)
+    closeDayBtn: 'סגירת יום (דוח Z)',
+    closeDayModalTitle: 'סגירת יום עבודה ודוח סוף יום (Z-Report)',
+    closeDayModalSubtitle: 'סגירת הקופה היומית, איפוס ליום חדש למחר, ושליחת דוחות מפורטים למחסנאי ולהנהלת חשבונות.',
+    confirmCloseDay: 'אשר סגירת יום ושלח דוחות',
+    totalGrossDay: 'סך גבייה ברוטו היום',
+    totalCourierFeesDay: 'סה״כ עמלות שליחים ששולמו',
+    netToBusinessDay: 'נטו מזומן נשאר בעסק / כספת',
+    activeShiftSummary: 'סיכום משמרת פעילה',
+    couriersSummaryTable: 'פירוט לפי שליחים',
+    notifiedParties: 'נמעני דוחות אוטומטיים',
+    warehouseReportBadge: 'מחסנאי: דוח מעטפות מזומן והפקדה לכספת',
+    accountingReportBadge: 'מנהל חשבונות: דוח פיננסי מלא (הכנסות, עמלות, רווח נטו)',
+    dayCloseoutSuccess: 'יום העבודה נסגר בהצלחה! דוחות נשלחו למחסנאי ולהנהלת חשבונות, והקופה אופסה לקראת מחר.',
+    dayCloseoutNotesPlaceholder: 'הערות סיכום יום (אופציונלי)...',
+    pastCloseoutsTitle: 'יומן דוחות סגירת יום (Z-Reports)',
+    noCloseoutsYet: 'טרם נרשמו סגירות יום קודמות במערכת.',
 
     // Empty state
     noRecordsFound: 'לא נמצאו הזמנות התואמות לחיפוש הנוכחי.',

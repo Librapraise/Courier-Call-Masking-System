@@ -1,9 +1,35 @@
 import { NextResponse } from 'next/server'
+import fs from 'node:fs'
+import path from 'node:path'
 import { supabaseAdmin, createClient } from '@/lib/supabase/server'
 import { BRANDS_LIST } from '@/lib/crm/catalog-data'
 import { sendTelegramMessage } from '@/lib/crm/telegram-bot'
 import { formatPhoneForStorage } from '@/lib/utils/phone'
 import { isStaffUser } from '@/lib/auth/roles'
+
+function getLocalDayCloseouts(): any[] {
+  try {
+    const filePath = path.join(process.cwd(), 'data', 'crm_day_closeouts.json')
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, 'utf-8')
+      return JSON.parse(content) || []
+    }
+  } catch (e) {}
+  return []
+}
+
+function saveLocalDayCloseout(record: any) {
+  try {
+    const dirPath = path.join(process.cwd(), 'data')
+    if (!fs.existsSync(dirPath)) {
+      fs.mkdirSync(dirPath, { recursive: true })
+    }
+    const filePath = path.join(dirPath, 'crm_day_closeouts.json')
+    const existing = getLocalDayCloseouts()
+    const updated = [record, ...existing.filter((x: any) => x.id !== record.id)].slice(0, 50)
+    fs.writeFileSync(filePath, JSON.stringify(updated, null, 2), 'utf-8')
+  } catch (e) {}
+}
 
 export async function GET() {
   try {
@@ -134,13 +160,42 @@ export async function GET() {
       console.warn('[CRM Dashboard API] Courier auto-sync warning:', syncErr)
     }
 
-    // 5. Calculate Top Metrics
+    // 5. Query latest Day Closeout to determine active shift
+    let recentDayCloseouts: any[] = []
+    let latestDayCloseout: any = null
+    try {
+      const { data: dbCloseouts } = await supabaseAdmin
+        .from('crm_day_closeouts')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10)
+      if (dbCloseouts && dbCloseouts.length > 0) {
+        recentDayCloseouts = dbCloseouts
+        latestDayCloseout = dbCloseouts[0]
+      }
+    } catch (coErr) {}
+
+    if (recentDayCloseouts.length === 0) {
+      const localCo = getLocalDayCloseouts()
+      if (localCo.length > 0) {
+        recentDayCloseouts = localCo
+        latestDayCloseout = localCo[0]
+      }
+    }
+
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const todayIso = today.toISOString()
 
+    const isRecentCloseout = latestDayCloseout && (new Date().getTime() - new Date(latestDayCloseout.created_at).getTime() < 36 * 3600 * 1000)
+    const shiftStartIso = isRecentCloseout
+      ? (latestDayCloseout.shift_end || latestDayCloseout.created_at)
+      : todayIso
+
     const allOrders = orders || []
-    const todayOrders = allOrders.filter(o => o.order_date >= todayIso)
+    const todayOrders = isRecentCloseout
+      ? allOrders.filter(o => o.order_date > shiftStartIso)
+      : allOrders.filter(o => o.order_date >= todayIso)
     const totalDeliveriesToday = todayOrders.length
     
     // Courier cash currently in the street/courier hands (UNSETTLED only)
@@ -293,7 +348,10 @@ export async function GET() {
       couriers,
       customers: customersData || [],
       cityCounts,
-      recentSettlements: recentSettlements || []
+      recentSettlements: recentSettlements || [],
+      recentDayCloseouts: recentDayCloseouts || [],
+      latestDayCloseout: latestDayCloseout || null,
+      shiftStartTime: shiftStartIso
     })
   } catch (err: any) {
     console.error('[CRM API] Unexpected error in GET:', err)
@@ -725,6 +783,327 @@ export async function POST(req: Request) {
         deliveryFees,
         warehouseNotifiedCount,
         warehouseRecipients:    Array.from(warehouseTelegramIds)
+      })
+    }
+
+    // ========================================================
+    // END-OF-DAY SHIFT CLOSEOUT & Z-REPORT (CLOSE_DAY)
+    // ========================================================
+    if (action === 'CLOSE_DAY') {
+      const { notes } = body
+
+      // 1. Determine active shift start
+      let latestCloseout: any = null
+      try {
+        const { data: dbCo } = await supabaseAdmin
+          .from('crm_day_closeouts')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (dbCo) latestCloseout = dbCo
+      } catch (coErr) {}
+
+      if (!latestCloseout) {
+        const localCo = getLocalDayCloseouts()
+        if (localCo.length > 0) latestCloseout = localCo[0]
+      }
+
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const defaultShiftStart = today.toISOString()
+      const isCloseoutRecent = latestCloseout && (new Date().getTime() - new Date(latestCloseout.created_at).getTime() < 36 * 3600 * 1000)
+      const shiftStart = isCloseoutRecent
+        ? (latestCloseout.shift_end || latestCloseout.created_at)
+        : defaultShiftStart
+
+      const shiftEnd = new Date().toISOString()
+
+      // 2. Fetch all orders belonging to this active shift
+      const query = supabaseAdmin
+        .from('crm_orders')
+        .select(`
+          id, total_price, courier_id, city, address, is_settled, order_date,
+          crm_couriers(id, name, phone_number, telegram_id)
+        `)
+      
+      const { data: shiftOrders } = isCloseoutRecent
+        ? await query.gt('order_date', shiftStart).lte('order_date', shiftEnd)
+        : await query.gte('order_date', shiftStart).lte('order_date', shiftEnd)
+
+      const orders = shiftOrders || []
+      const totalOrders = orders.length
+
+      // 3. Compute detailed per-courier breakdown
+      const STANDARD_FEE = 100
+      const BAT_YAM_FEE = 120
+
+      const courierMap = new Map<string, {
+        courier_id: string
+        courier_name: string
+        courier_phone?: string
+        courier_telegram_id?: number | string | null
+        orders_count: number
+        gross_collected: number
+        standard_count: number
+        bat_yam_count: number
+        courier_fee: number
+        bonus: number
+        net_to_safe: number
+      }>()
+
+      for (const o of orders) {
+        const c = (o as any).crm_couriers
+        const cId = c?.id || o.courier_id || 'unassigned'
+        const cName = c?.name || (cId === 'unassigned' ? 'ללא שליח משובץ' : 'שליח')
+
+        if (!courierMap.has(cId)) {
+          courierMap.set(cId, {
+            courier_id: cId,
+            courier_name: cName,
+            courier_phone: c?.phone_number,
+            courier_telegram_id: c?.telegram_id,
+            orders_count: 0,
+            gross_collected: 0,
+            standard_count: 0,
+            bat_yam_count: 0,
+            courier_fee: 0,
+            bonus: 0,
+            net_to_safe: 0
+          })
+        }
+
+        const entry = courierMap.get(cId)!
+        entry.orders_count += 1
+        const price = Number(o.total_price) || 0
+        entry.gross_collected += price
+
+        if (cId !== 'unassigned') {
+          const isBatYam = (o.city || '').includes('בת ים') || (o.address || '').includes('בת ים')
+          if (isBatYam) {
+            entry.bat_yam_count += 1
+            entry.courier_fee += BAT_YAM_FEE
+          } else {
+            entry.standard_count += 1
+            entry.courier_fee += STANDARD_FEE
+          }
+        }
+      }
+
+      let totalGross = 0
+      let totalCourierPay = 0
+      const courierBreakdown: any[] = []
+
+      courierMap.forEach((entry) => {
+        entry.net_to_safe = Math.max(0, entry.gross_collected - entry.courier_fee)
+        totalGross += entry.gross_collected
+        totalCourierPay += entry.courier_fee
+        courierBreakdown.push(entry)
+      })
+
+      const totalNetToSafe = Math.max(0, totalGross - totalCourierPay)
+
+      // 4. Mark all orders in this shift as settled
+      if (isCloseoutRecent) {
+        await supabaseAdmin
+          .from('crm_orders')
+          .update({ is_settled: true })
+          .gt('order_date', shiftStart)
+          .lte('order_date', shiftEnd)
+      } else {
+        await supabaseAdmin
+          .from('crm_orders')
+          .update({ is_settled: true })
+          .gte('order_date', shiftStart)
+          .lte('order_date', shiftEnd)
+      }
+
+      // Also create cash_settlements rows for any courier who had orders
+      for (const cEntry of courierBreakdown) {
+        if (cEntry.courier_id !== 'unassigned') {
+          try {
+            await supabaseAdmin.from('cash_settlements').insert({
+              courier_id: cEntry.courier_id,
+              total_collected: cEntry.gross_collected,
+              gross_collected: cEntry.gross_collected,
+              courier_pay: cEntry.courier_fee,
+              bonus_amount: 0,
+              net_expected: cEntry.net_to_safe,
+              amount_received: cEntry.net_to_safe,
+              status: 'SETTLED',
+              notes: `סגירת יום רשמית (${cEntry.orders_count} משלוחים | עמלה: ₪${cEntry.courier_fee} | נטו לכספת: ₪${cEntry.net_to_safe})`
+            })
+          } catch (e) {}
+        }
+      }
+
+      // 5. Save the Day Closeout record
+      const closeoutRecord = {
+        id: crypto.randomUUID(),
+        closeout_date: new Date().toISOString().split('T')[0],
+        shift_start: shiftStart,
+        shift_end: shiftEnd,
+        total_orders: totalOrders,
+        gross_collected: totalGross,
+        total_courier_pay: totalCourierPay,
+        total_bonus: 0,
+        net_to_safe: totalNetToSafe,
+        courier_breakdown: courierBreakdown,
+        notes: notes || 'סגירת יום מוצלחת',
+        closed_by: user.id,
+        closed_by_name: user.user_metadata?.name || user.email || 'מנהל משמרת',
+        created_at: shiftEnd
+      }
+
+      try {
+        await supabaseAdmin
+          .from('crm_day_closeouts')
+          .insert(closeoutRecord)
+      } catch (e) {}
+
+      // Save to local fallback file for guaranteed persistence
+      saveLocalDayCloseout(closeoutRecord)
+
+      // 6. DISPATCH TELEGRAM MESSAGES
+      const botToken = process.env.TELEGRAM_BOT_TOKEN || ''
+      const closeDateFormatted = new Date(shiftEnd).toLocaleString('he-IL', {
+        timeZone: 'Asia/Jerusalem',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+
+      const courierListFormatted = courierBreakdown
+        .filter(c => c.courier_id !== 'unassigned')
+        .map((c, i) =>
+          `• *${c.courier_name}:* ${c.orders_count} משלוחים | גבה ₪${c.gross_collected.toLocaleString()} | עמלה ₪${c.courier_fee.toLocaleString()} | *נטו לכספת: ₪${c.net_to_safe.toLocaleString()}*`
+        )
+        .join('\n') || 'ללא פעילות שליחים'
+
+      // Message 1: To Warehouseman (Physical Cash Envelopes Collection & Safe Deposit)
+      const warehouseMessage =
+        `🌙 *דוח סגירת יום — מחסנאי וכספת (Z-Report)*\n` +
+        `📅 *מועד סגירת יום:* ${closeDateFormatted}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📦 *סה״כ משלוחים שסופקו היום:* ${totalOrders}\n` +
+        `💰 *סך גבייה כולל מלקוחות:* ₪${totalGross.toLocaleString()}\n` +
+        `🛵 *סה״כ עמלות שליחים ששולמו:* ₪${totalCourierPay.toLocaleString()}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `💵 *סך נטו מזומן שחייב להיות בכספת: ₪${totalNetToSafe.toLocaleString()}*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📋 *פירוט מעטפות מזומן לגבייה מכל שליח:*\n` +
+        `${courierListFormatted}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        (notes ? `📝 *הערות מנהל משמרת:* ${notes}\n\n` : '') +
+        `🔒 *חובה על המחסנאי לוודא קבלת כל המעטפות במזומן ונעילתן בכספת.*`
+
+      // Message 2: To Accounting Manager (Full Financial Audit Report)
+      const accountantMessage =
+        `📊 *דוח יומי פיננסי — הנהלת חשבונות (Z-Report)*\n` +
+        `📅 *מועד סגירה:* ${closeDateFormatted}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📈 *סיכום פעילות עסקית ופיננסית:*\n` +
+        `• *סה״כ הזמנות שנמסרו:* ${totalOrders}\n` +
+        `• *מחזור גבייה ברוטו (מזומן):* ₪${totalGross.toLocaleString()}\n` +
+        `• *הוצאות עמלות שליחים:* ₪${totalCourierPay.toLocaleString()}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `💵 *רווח נטו במזומן שהופקד לעסק: ₪${totalNetToSafe.toLocaleString()}*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `👥 *פירוט הכנסות ועמלות לפי שליח:*\n` +
+        `${courierListFormatted}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        (notes ? `📝 *הערות מנהל:* ${notes}\n\n` : '') +
+        `✅ *סטטוס משמרת:* סגירת יום רשמית הושלמה. כל ההזמנות סומנו כמיושבות והקופה אופסה לקראת מחר.`
+
+      // Resolve recipient Telegram IDs
+      const warehouseTelegramIds = new Set<string>()
+      const accountantTelegramIds = new Set<string>()
+
+      // 1. Env configured
+      const whEnv = (process.env.WAREHOUSE_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
+      whEnv.forEach(id => warehouseTelegramIds.add(id))
+
+      const accEnv = (process.env.ACCOUNTANT_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
+      accEnv.forEach(id => accountantTelegramIds.add(id))
+
+      const adminIds = (process.env.ALLOWED_TELEGRAM_ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
+      adminIds.forEach(id => accountantTelegramIds.add(id))
+
+      // 2. Fetch profiles
+      try {
+        const { data: allProfiles } = await supabaseAdmin.from('profiles').select('id, role, phone_number')
+        const { data: crmRoster } = await supabaseAdmin.from('crm_couriers').select('phone_number, telegram_id, name')
+        const { data: authUsersList } = await supabaseAdmin.auth.admin.listUsers()
+
+        // Match warehouseman and accountant profiles
+        for (const u of authUsersList?.users || []) {
+          const metaRole = u.user_metadata?.role
+          const metaTg = u.user_metadata?.telegram_id
+          if (metaRole === 'warehouseman' && metaTg) {
+            warehouseTelegramIds.add(String(metaTg).trim())
+          }
+          if ((metaRole === 'accountant' || metaRole === 'admin') && metaTg) {
+            accountantTelegramIds.add(String(metaTg).trim())
+          }
+        }
+
+        for (const wp of allProfiles || []) {
+          if (wp.role === 'warehouseman') {
+            const cleanPhone = (wp.phone_number || '').replace(/\D/g, '')
+            const matched = (crmRoster || []).find(r => (r.phone_number || '').replace(/\D/g, '').endsWith(cleanPhone.slice(-9)))
+            if (matched?.telegram_id) warehouseTelegramIds.add(String(matched.telegram_id).trim())
+          }
+          if (wp.role === 'accountant') {
+            const cleanPhone = (wp.phone_number || '').replace(/\D/g, '')
+            const matched = (crmRoster || []).find(r => (r.phone_number || '').replace(/\D/g, '').endsWith(cleanPhone.slice(-9)))
+            if (matched?.telegram_id) accountantTelegramIds.add(String(matched.telegram_id).trim())
+          }
+        }
+
+        // Match roster for soso / warehouse
+        for (const r of crmRoster || []) {
+          const lowerName = (r.name || '').toLowerCase()
+          if (lowerName.includes('soso') || lowerName.includes('מחסנאי') || lowerName.includes('warehouse')) {
+            if (r.telegram_id) warehouseTelegramIds.add(String(r.telegram_id).trim())
+          }
+        }
+      } catch (e) {}
+
+      let warehouseSent = 0
+      let accountantSent = 0
+
+      if (botToken) {
+        for (const whId of warehouseTelegramIds) {
+          try {
+            const ok = await sendTelegramMessage(botToken, {
+              chat_id: whId,
+              text: warehouseMessage,
+              parse_mode: 'Markdown'
+            })
+            if (ok) warehouseSent++
+          } catch (e) {}
+        }
+
+        for (const accId of accountantTelegramIds) {
+          try {
+            const ok = await sendTelegramMessage(botToken, {
+              chat_id: accId,
+              text: accountantMessage,
+              parse_mode: 'Markdown'
+            })
+            if (ok) accountantSent++
+          } catch (e) {}
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        closeout: closeoutRecord,
+        warehouseSent,
+        accountantSent,
+        message: 'יום העבודה נסגר בהצלחה! הדוחות המפורטים נשלחו למחסנאי ולהנהלת חשבונות.'
       })
     }
 
