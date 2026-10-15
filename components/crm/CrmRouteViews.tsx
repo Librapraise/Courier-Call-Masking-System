@@ -125,7 +125,9 @@ export function DashboardRouteView({
   chartTimeframe,
   setChartTimeframe,
   setActiveNav,
-  setSelectedOrderForDrawer
+  setSelectedOrderForDrawer,
+  shiftStartTime,
+  activeShiftOrders
 }: {
   orders: Order[]
   couriers: Courier[]
@@ -141,7 +143,11 @@ export function DashboardRouteView({
   setChartTimeframe: (t: 'year' | 'month' | 'week') => void
   setActiveNav: (nav: any) => void
   setSelectedOrderForDrawer: (o: Order) => void
+  shiftStartTime?: string | null
+  activeShiftOrders?: Order[]
 }) {
+  const currentShiftOrders = activeShiftOrders || (shiftStartTime ? orders.filter(o => o.order_date > shiftStartTime) : orders)
+  const displayDispatches = todayOnly ? currentShiftOrders : orders
   return (
     <div className="space-y-6">
       {/* Hero Announcement Carousel */}
@@ -339,7 +345,7 @@ export function DashboardRouteView({
             </div>
             <div className="flex items-baseline gap-2 mt-2">
               <span className="text-3xl font-extrabold text-slate-900 dark:text-white">
-                {metrics.totalDeliveriesToday || orders.length}
+                {todayOnly ? (metrics.totalDeliveriesToday ?? 0) : orders.length}
               </span>
               <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-0.5">
                 <TrendingUpIcon className="w-3.5 h-3.5" />
@@ -508,43 +514,63 @@ export function DashboardRouteView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-                {orders.slice(0, 5).map(o => (
-                  <tr
-                    key={o.id}
-                    onClick={() => setSelectedOrderForDrawer(o)}
-                    className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition cursor-pointer"
-                  >
-                    <td className="py-2.5 font-bold text-slate-800 dark:text-slate-200 max-w-[180px] truncate">
-                      {o.crm_customers?.address_name || o.address}
-                    </td>
-                    <td className="py-2.5 text-slate-500 dark:text-slate-400 font-medium">{o.city}</td>
-                    <td className="py-2.5">
-                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold">
-                        {o.brands?.name || '—'}
-                      </span>
-                    </td>
-                    <td className="py-2.5 font-mono font-bold text-slate-900 dark:text-white">
-                      ₪{Number(o.total_price || 0).toLocaleString()}
-                    </td>
-                    <td className="py-2.5 text-center">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          o.is_settled
-                            ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
-                            : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
-                        }`}
-                      >
-                        {o.is_settled ? 'Settled' : 'Open'}
-                      </span>
+                {displayDispatches.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-400 dark:text-slate-500">
+                      <div className="flex flex-col items-center justify-center gap-1.5 py-4">
+                        <TruckIcon className="w-8 h-8 text-slate-300 dark:text-slate-700 stroke-[1.5]" />
+                        <p className="font-bold text-xs text-slate-700 dark:text-slate-300">
+                          {isRtl ? 'אין משלוחים פעילים במשמרת זו' : 'No active dispatches in current shift'}
+                        </p>
+                        <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                          {isRtl ? 'הקופה נסגרה ואופסה • המערכת מוכנה לקבלת הזמנות חדשות' : 'Register closed & reset • Ready for incoming orders'}
+                        </p>
+                      </div>
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  displayDispatches.slice(0, 5).map(o => (
+                    <tr
+                      key={o.id}
+                      onClick={() => setSelectedOrderForDrawer(o)}
+                      className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition cursor-pointer"
+                    >
+                      <td className="py-2.5 font-bold text-slate-800 dark:text-slate-200 max-w-[180px] truncate">
+                        {o.crm_customers?.address_name || o.address}
+                      </td>
+                      <td className="py-2.5 text-slate-500 dark:text-slate-400 font-medium">{o.city}</td>
+                      <td className="py-2.5">
+                        <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold">
+                          {o.brands?.name || '—'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 font-mono font-bold text-slate-900 dark:text-white">
+                        ₪{Number(o.total_price || 0).toLocaleString()}
+                      </td>
+                      <td className="py-2.5 text-center">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            o.is_settled
+                              ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                              : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
+                          }`}
+                        >
+                          {o.is_settled ? 'Settled' : 'Open'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
 
           <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400 dark:text-slate-500">
-            <span>Displaying latest 5 of {orders.length} real-time dispatches</span>
+            <span>
+              {todayOnly
+                ? (isRtl ? `מציג ${Math.min(5, displayDispatches.length)} מתוך ${displayDispatches.length} משלוחים במשמרת פעילה` : `Displaying ${Math.min(5, displayDispatches.length)} of ${displayDispatches.length} active shift dispatches`)
+                : (isRtl ? `מציג ${Math.min(5, orders.length)} מתוך ${orders.length} משלוחים בכל הזמנים` : `Displaying latest 5 of ${orders.length} all-time dispatches`)}
+            </span>
             <button
               onClick={() => setActiveNav('orders')}
               className="font-bold text-[#4352E8] dark:text-indigo-400 hover:underline cursor-pointer"
@@ -571,17 +597,28 @@ export function DashboardRouteView({
               </button>
             </div>
             <div className="space-y-2 text-xs">
-              {couriers.slice(0, 3).map(c => (
-                <div key={c.id} className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-900/60">
-                  <div>
-                    <p className="font-bold text-slate-800 dark:text-slate-200">{c.name}</p>
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500">{c.todayOrders || 0} orders</p>
-                  </div>
-                  <span className="font-mono font-extrabold text-emerald-700 dark:text-emerald-400">
-                    ₪{(c.todayCash || 0).toLocaleString()}
-                  </span>
+              {couriers.filter(c => (c.todayCash || 0) > 0).length === 0 ? (
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 text-center text-slate-400 dark:text-slate-500">
+                  <p className="font-semibold text-[11px] text-emerald-600 dark:text-emerald-400">
+                    {isRtl ? '✓ כל הקופות מאופסות' : '✓ All couriers balanced'}
+                  </p>
+                  <p className="text-[10px] mt-0.5">
+                    {isRtl ? 'אין כספים פתוחים בידי שליחים' : 'No cash held in street'}
+                  </p>
                 </div>
-              ))}
+              ) : (
+                couriers.filter(c => (c.todayCash || 0) > 0).slice(0, 3).map(c => (
+                  <div key={c.id} className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-900/60">
+                    <div>
+                      <p className="font-bold text-slate-800 dark:text-slate-200">{c.name}</p>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500">{c.todayOrders || 0} orders</p>
+                    </div>
+                    <span className="font-mono font-extrabold text-emerald-700 dark:text-emerald-400">
+                      ₪{(c.todayCash || 0).toLocaleString()}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
@@ -717,9 +754,9 @@ export function OrdersRouteView({
         <div className="bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
           <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Pending Settlement</span>
           <p className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-1">
-            {orders.filter(o => !o.is_settled).length}
+            {(todayOnly ? activeShiftOrders : orders).filter(o => !o.is_settled).length}
           </p>
-          <p className="text-[10px] text-slate-400 dark:text-slate-500">Unreconciled cash</p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500">{todayOnly ? 'Active shift pending' : 'All-time unreconciled'}</p>
         </div>
         <div className="bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
           <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total Value</span>

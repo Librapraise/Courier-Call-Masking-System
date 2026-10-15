@@ -1175,40 +1175,40 @@ export async function POST(req: Request) {
         total_courier_pay: totalCourierPay,
         total_bonus: totalBonus,
         net_to_safe: totalNetToSafe,
-        total_net_profit: totalOverallBusinessProfit,
         courier_breakdown: courierBreakdown,
-        notes: notes || 'סגירת יום מוצלחת',
+        notes: notes ? `${notes} (רווח: ₪${totalOverallBusinessProfit.toLocaleString()})` : `סגירת יום מוצלחת (רווח: ₪${totalOverallBusinessProfit.toLocaleString()})`,
         closed_by: user.id,
         closed_by_name: user.user_metadata?.name || user.email || 'מנהל משמרת',
         created_at: shiftEnd
       }
 
-      try {
-        await supabaseAdmin
-          .from('crm_day_closeouts')
-          .insert(closeoutRecord)
-      } catch (e) {
+      let { error: insertErr } = await supabaseAdmin
+        .from('crm_day_closeouts')
+        .insert(closeoutRecord)
+
+      if (insertErr) {
         // Fallback if DB table has base schema without extra columns
-        try {
-          await supabaseAdmin
-            .from('crm_day_closeouts')
-            .insert({
-              id: closeoutRecord.id,
-              closeout_date: closeoutRecord.closeout_date,
-              shift_start: closeoutRecord.shift_start,
-              shift_end: closeoutRecord.shift_end,
-              total_orders: closeoutRecord.total_orders,
-              gross_collected: closeoutRecord.gross_collected,
-              total_courier_pay: closeoutRecord.total_courier_pay,
-              total_bonus: closeoutRecord.total_bonus,
-              net_to_safe: closeoutRecord.net_to_safe,
-              courier_breakdown: closeoutRecord.courier_breakdown,
-              notes: closeoutRecord.notes,
-              closed_by: closeoutRecord.closed_by,
-              closed_by_name: closeoutRecord.closed_by_name,
-              created_at: closeoutRecord.created_at
-            })
-        } catch (subErr) {}
+        const { error: retryErr } = await supabaseAdmin
+          .from('crm_day_closeouts')
+          .insert({
+            id: closeoutRecord.id,
+            closeout_date: closeoutRecord.closeout_date,
+            shift_start: closeoutRecord.shift_start,
+            shift_end: closeoutRecord.shift_end,
+            total_orders: closeoutRecord.total_orders,
+            gross_collected: closeoutRecord.gross_collected,
+            total_courier_pay: closeoutRecord.total_courier_pay,
+            total_bonus: closeoutRecord.total_bonus,
+            net_to_safe: closeoutRecord.net_to_safe,
+            courier_breakdown: courierBreakdown,
+            notes: closeoutRecord.notes,
+            closed_by: closeoutRecord.closed_by,
+            closed_by_name: closeoutRecord.closed_by_name,
+            created_at: closeoutRecord.created_at
+          })
+        if (retryErr) {
+          console.error('[CRM API] CRITICAL: Failed to insert minimal closeout:', retryErr)
+        }
       }
 
       // Save to local fallback file for guaranteed persistence

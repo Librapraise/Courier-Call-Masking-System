@@ -1131,13 +1131,13 @@ export function OrderDraftModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 sm:p-4 animate-in fade-in overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in overflow-hidden">
       <div
-        className="w-full max-w-3xl lg:max-w-4xl rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 shadow-2xl p-5 sm:p-6 space-y-4 my-auto max-h-[92vh] overflow-y-auto"
+        className="w-full max-w-3xl lg:max-w-4xl h-full max-h-[calc(100dvh-1rem)] sm:h-auto sm:max-h-[90vh] rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col overflow-hidden"
         dir={isRtl ? 'rtl' : 'ltr'}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+        {/* Header — Pinned at Top */}
+        <div className="shrink-0 flex items-center justify-between border-b border-slate-100 dark:border-slate-800 p-4 sm:p-5 bg-white dark:bg-[#0B0F17] z-10">
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 flex items-center justify-center text-[#4352E8] dark:text-indigo-400">
               <EditIcon className="w-5 h-5" />
@@ -1163,13 +1163,13 @@ export function OrderDraftModal({
         </div>
 
         {error && (
-          <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-400 text-xs font-semibold">
+          <div className="mx-4 mt-3 p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-400 text-xs font-semibold shrink-0">
             {error}
           </div>
         )}
 
-        {/* Mode Switcher & Courier Assignment Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+        {/* Mode Switcher & Courier Assignment Bar — Pinned under Header */}
+        <div className="shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 sm:px-5 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30">
           <div className="inline-flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shrink-0">
             <button
               type="button"
@@ -1198,7 +1198,7 @@ export function OrderDraftModal({
           </div>
 
           {/* Quick Courier Assignment Selector */}
-          <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/60 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shrink-0">
+          <div className="flex items-center gap-2 bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shrink-0 shadow-xs">
             <span className="text-xs">🛵</span>
             <label className="text-xs font-bold text-slate-600 dark:text-slate-300 whitespace-nowrap">
               {isRtl ? 'שליח משובץ:' : 'Courier:'}
@@ -1206,7 +1206,7 @@ export function OrderDraftModal({
             <select
               value={selectedCourierId}
               onChange={e => setSelectedCourierId(e.target.value)}
-              className="py-1 px-2.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-200 font-semibold focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 cursor-pointer min-w-[130px]"
+              className="py-1 px-2.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-200 font-semibold focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 cursor-pointer min-w-[130px]"
             >
               <option value="">{isRtl ? 'ללא שליח (Unassigned)' : 'Unassigned'}</option>
               {(couriers || []).map(c => (
@@ -1218,11 +1218,16 @@ export function OrderDraftModal({
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {activeMode === 'draft' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Draft Textarea */}
-              <div className="space-y-1.5">
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <div
+            data-scrollbar="hidden"
+            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+            className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-4 overscroll-contain no-scrollbar"
+          >
+            {activeMode === 'draft' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Draft Textarea */}
+                <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                     {isRtl ? 'תוכן הודעת המשלוח (טיוטה חיה):' : 'Delivery Message Text (Live Draft):'}
@@ -1403,9 +1408,10 @@ export function OrderDraftModal({
               </div>
             </div>
           )}
+          </div>
 
-          {/* Footer Actions */}
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+          {/* Footer Actions — Pinned at Bottom */}
+          <div className="shrink-0 flex items-center justify-end gap-2 p-3 sm:p-4 bg-slate-50 dark:bg-slate-900/90 border-t border-slate-100 dark:border-slate-800 z-10">
             <button
               type="button"
               onClick={onClose}
