@@ -7,6 +7,7 @@ import { sendTelegramMessage } from '@/lib/crm/telegram-bot'
 import { formatPhoneForStorage } from '@/lib/utils/phone'
 import { isStaffUser } from '@/lib/auth/roles'
 import { getIsraelDateString, getIsraelMidnightIso } from '@/lib/crm/date-utils'
+import { parseDeliveryMessage } from '@/lib/crm/parser'
 
 function getLocalDayCloseouts(): any[] {
   try {
@@ -378,21 +379,41 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     // 0. Verify Auth Session & Admin Privilege
-    const supabase = await createClient()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const authHeader = req.headers.get('authorization')
+    const isServiceAuth = authHeader && process.env.SUPABASE_SERVICE_ROLE_KEY && authHeader === `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
 
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized: Authentication required.' }, { status: 401 })
-    }
+    let user: any = null
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
+    if (!isServiceAuth) {
+      let supabase
+      try {
+        supabase = await createClient()
+      } catch (e: any) {
+        return NextResponse.json({ error: 'Unauthorized: Session context missing.' }, { status: 401 })
+      }
+      const authRes = await supabase.auth.getUser()
+      user = authRes.data?.user
+      const authError = authRes.error
 
-    if (!isStaffUser(user, profile)) {
-      return NextResponse.json({ error: 'Forbidden: Admin, Super Admin, or Warehouseman privileges required.' }, { status: 403 })
+      if (authError || !user) {
+        return NextResponse.json({ error: 'Unauthorized: Authentication required.' }, { status: 401 })
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+
+      if (!isStaffUser(user, profile)) {
+        return NextResponse.json({ error: 'Forbidden: Admin, Super Admin, or Warehouseman privileges required.' }, { status: 403 })
+      }
+    } else {
+      user = {
+        id: 'system-service',
+        email: 'system@crm.internal',
+        user_metadata: { name: 'מערכת / מנהל אוטומטי' }
+      }
     }
 
     const body = await req.json()
@@ -1454,6 +1475,241 @@ export async function POST(req: Request) {
       }
 
       return NextResponse.json({ success: true, deletedCourierId: courierId })
+    }
+
+    if (action === 'DELETE_ORDER') {
+      const { orderId } = body
+      if (!orderId) {
+        return NextResponse.json({ error: 'Missing orderId' }, { status: 400 })
+      }
+
+      // 1. Fetch order
+      const { data: order, error: orderErr } = await supabaseAdmin
+        .from('crm_orders')
+        .select('*')
+        .eq('id', orderId)
+        .single()
+
+      if (orderErr || !order) {
+        return NextResponse.json({ error: 'Order not found' }, { status: 404 })
+      }
+
+      // 2. Rollback inventory transactions: restore stock for each deducted product
+      const { data: transactions } = await supabaseAdmin
+        .from('inventory_transactions')
+        .select('id, product_id, quantity')
+        .eq('order_id', orderId)
+
+      for (const tx of transactions || []) {
+        if (Number(tx.quantity) < 0) {
+          const qtyToRestore = Math.abs(Number(tx.quantity))
+          const { data: prod } = await supabaseAdmin
+            .from('products')
+            .select('stock_on_hand, name')
+            .eq('id', tx.product_id)
+            .single()
+
+          if (prod) {
+            const restoredStock = Number(prod.stock_on_hand || 0) + qtyToRestore
+            await supabaseAdmin
+              .from('products')
+              .update({ stock_on_hand: restoredStock, updated_at: new Date().toISOString() })
+              .eq('id', tx.product_id)
+
+            // Log restock audit
+            await supabaseAdmin.from('inventory_transactions').insert({
+              product_id: tx.product_id,
+              order_id: null,
+              quantity: qtyToRestore,
+              reason: 'ORDER_CANCELLED_RESTOCK',
+              notes: `Stock restored from cancelled order ${orderId} (${prod.name})`
+            })
+          }
+        }
+      }
+
+      // Delete the original order inventory transactions
+      await supabaseAdmin.from('inventory_transactions').delete().eq('order_id', orderId)
+
+      // 3. Rollback customer total spent & order count
+      if (order.customer_id) {
+        const { data: cust } = await supabaseAdmin
+          .from('crm_customers')
+          .select('total_orders, total_spent')
+          .eq('id', order.customer_id)
+          .single()
+
+        if (cust) {
+          const newOrders = Math.max(0, (cust.total_orders || 1) - 1)
+          const newSpent = Math.max(0, Number(cust.total_spent || 0) - Number(order.total_price || 0))
+          await supabaseAdmin
+            .from('crm_customers')
+            .update({
+              total_orders: newOrders,
+              total_spent: newSpent,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', order.customer_id)
+        }
+      }
+
+      // 4. Delete the order from crm_orders
+      const { error: delErr } = await supabaseAdmin.from('crm_orders').delete().eq('id', orderId)
+      if (delErr) {
+        return NextResponse.json({ error: delErr.message }, { status: 400 })
+      }
+
+      return NextResponse.json({ success: true, deletedOrderId: orderId })
+    }
+
+    if (action === 'UPDATE_ORDER') {
+      const { orderId, rawMessage, courierId, manualFields } = body
+      if (!orderId) {
+        return NextResponse.json({ error: 'Missing orderId' }, { status: 400 })
+      }
+
+      // 1. Fetch current order
+      const { data: currentOrder, error: orderErr } = await supabaseAdmin
+        .from('crm_orders')
+        .select('*')
+        .eq('id', orderId)
+        .single()
+
+      if (orderErr || !currentOrder) {
+        return NextResponse.json({ error: 'Order not found' }, { status: 404 })
+      }
+
+      let newAddress = currentOrder.address
+      let newCity = currentOrder.city
+      let newMenuItems = currentOrder.menu_items
+      let newActualItems = currentOrder.actual_items
+      let newTotalPrice = Number(currentOrder.total_price) || 0
+      let newBrandId = currentOrder.brand_id
+      let newCourierId = courierId !== undefined ? courierId : currentOrder.courier_id
+      let finalRawMessage = rawMessage !== undefined ? rawMessage : currentOrder.raw_message
+
+      // If rawMessage was edited, parse it and reconcile deductions!
+      if (rawMessage && typeof rawMessage === 'string' && rawMessage.trim()) {
+        const parsed = parseDeliveryMessage(rawMessage.trim())
+        if (parsed.customerName) newAddress = parsed.customerName
+        if (parsed.city) newCity = parsed.city
+        if (parsed.menuItems) newMenuItems = parsed.menuItems
+        if (parsed.actualItems) newActualItems = parsed.actualItems
+        if (parsed.totalPrice > 0) newTotalPrice = parsed.totalPrice
+
+        // Resolve brand if matched
+        if (parsed.brand) {
+          const { data: matchedBrand } = await supabaseAdmin
+            .from('brands')
+            .select('id')
+            .eq('name', parsed.brand)
+            .maybeSingle()
+          if (matchedBrand) newBrandId = matchedBrand.id
+        }
+
+        // Reconcile Inventory:
+        // A. Restore previous deductions for this order
+        const { data: prevTx } = await supabaseAdmin
+          .from('inventory_transactions')
+          .select('id, product_id, quantity')
+          .eq('order_id', orderId)
+
+        for (const tx of prevTx || []) {
+          if (Number(tx.quantity) < 0) {
+            const qtyBack = Math.abs(Number(tx.quantity))
+            const { data: p } = await supabaseAdmin.from('products').select('stock_on_hand').eq('id', tx.product_id).single()
+            if (p) {
+              await supabaseAdmin.from('products').update({
+                stock_on_hand: Number(p.stock_on_hand || 0) + qtyBack,
+                updated_at: new Date().toISOString()
+              }).eq('id', tx.product_id)
+            }
+          }
+        }
+        // Remove previous transactions for this order
+        await supabaseAdmin.from('inventory_transactions').delete().eq('order_id', orderId)
+
+        // B. Apply new deductions
+        for (const d of parsed.deductions) {
+          const { data: prod } = await supabaseAdmin
+            .from('products')
+            .select('id, name, unit, stock_on_hand')
+            .eq('name', d.warehouseProductName)
+            .maybeSingle()
+
+          if (prod) {
+            const newStock = Math.max(0, Number(prod.stock_on_hand || 0) - Math.abs(d.quantity))
+            await supabaseAdmin.from('products').update({
+              stock_on_hand: newStock,
+              updated_at: new Date().toISOString()
+            }).eq('id', prod.id)
+
+            await supabaseAdmin.from('inventory_transactions').insert({
+              product_id: prod.id,
+              order_id: orderId,
+              quantity: -Math.abs(d.quantity),
+              reason: 'DISPATCH_DEDUCTION',
+              notes: `Updated deduction from edited order ${orderId}`
+            })
+          }
+        }
+      } else if (manualFields) {
+        // Manual field override (e.g. changing price or address directly)
+        if (manualFields.address !== undefined) newAddress = manualFields.address
+        if (manualFields.city !== undefined) newCity = manualFields.city
+        if (manualFields.totalPrice !== undefined) newTotalPrice = Number(manualFields.totalPrice) || 0
+        if (manualFields.menuItems !== undefined) newMenuItems = manualFields.menuItems
+        if (manualFields.actualItems !== undefined) newActualItems = manualFields.actualItems
+      }
+
+      // Update customer total_spent difference
+      if (currentOrder.customer_id && newTotalPrice !== Number(currentOrder.total_price)) {
+        const delta = newTotalPrice - Number(currentOrder.total_price)
+        const { data: cust } = await supabaseAdmin
+          .from('crm_customers')
+          .select('total_spent')
+          .eq('id', currentOrder.customer_id)
+          .single()
+        if (cust) {
+          await supabaseAdmin
+            .from('crm_customers')
+            .update({
+              total_spent: Math.max(0, Number(cust.total_spent || 0) + delta),
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', currentOrder.customer_id)
+        }
+      }
+
+      // Update order in crm_orders
+      const { data: updatedOrder, error: updateErr } = await supabaseAdmin
+        .from('crm_orders')
+        .update({
+          address: newAddress,
+          city: newCity,
+          menu_items: newMenuItems,
+          actual_items: newActualItems,
+          total_price: newTotalPrice,
+          brand_id: newBrandId,
+          courier_id: newCourierId,
+          raw_message: finalRawMessage
+        })
+        .eq('id', orderId)
+        .select(`
+          id, customer_id, brand_id, courier_id, address, city,
+          menu_items, actual_items, total_price, is_settled,
+          raw_message, order_date, created_at,
+          brands(id, name),
+          crm_couriers(id, name, phone_number, telegram_id),
+          crm_customers(id, address_name, phone_number, telegram_handle, customer_type)
+        `)
+        .single()
+
+      if (updateErr) {
+        return NextResponse.json({ error: updateErr.message }, { status: 400 })
+      }
+
+      return NextResponse.json({ success: true, order: updatedOrder })
     }
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

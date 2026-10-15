@@ -655,7 +655,9 @@ export function OrdersRouteView({
   setSelectedOrderForDrawer,
   couriers = [],
   onAssignCourier,
-  shiftStartTime
+  shiftStartTime,
+  onEditOrder,
+  onDeleteOrder
 }: {
   orders: Order[]
   filteredOrders: Order[]
@@ -674,6 +676,8 @@ export function OrdersRouteView({
   couriers?: Courier[]
   onAssignCourier?: (orderId: string, courierId: string | null) => Promise<void>
   shiftStartTime?: string | null
+  onEditOrder?: (o: Order) => void
+  onDeleteOrder?: (o: Order) => void
 }) {
   const israelTodayStr = getIsraelDateString()
   const activeShiftOrders = orders.filter(o => {
@@ -910,20 +914,40 @@ export function OrdersRouteView({
                       </td>
                       <td className="py-3.5 px-3 text-center" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1.5">
+                          {onEditOrder && (
+                            <button
+                              type="button"
+                              onClick={() => onEditOrder(order)}
+                              className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-[#4352E8] dark:text-indigo-400 transition cursor-pointer"
+                              title={isRtl ? 'ערוך הזמנה וטיוטת הודעה' : 'Edit Order / Draft Message'}
+                            >
+                              <EditIcon className="w-4 h-4" />
+                            </button>
+                          )}
+                          {onDeleteOrder && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteOrder(order)}
+                              className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 transition cursor-pointer"
+                              title={isRtl ? 'בטל ומחק משלוח' : 'Cancel / Delete Order'}
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </button>
+                          )}
                           {rawPhone && (
                             <>
                               <a
                                 href={`https://wa.me/${waNumber}`}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition"
+                                className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-400 transition"
                                 title={t.whatsappCustomer}
                               >
                                 <WhatsAppIcon className="w-4 h-4" />
                               </a>
                               <a
                                 href={`tel:${rawPhone}`}
-                                className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-[#4352E8] transition"
+                                className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 transition"
                                 title={t.callCustomer}
                               >
                                 <PhoneIcon className="w-4 h-4" />

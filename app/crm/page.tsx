@@ -60,7 +60,9 @@ import {
   ProductDeleteModal,
   BrandManagerModal,
   CourierModal,
-  CourierDeleteModal
+  CourierDeleteModal,
+  OrderDraftModal,
+  OrderDeleteModal
 } from '@/components/crm/CrmCrudModals'
 
 interface Customer {
@@ -247,6 +249,10 @@ export default function GhostCrmDashboard() {
   const [showCourierModal, setShowCourierModal] = useState(false)
   const [editingCourier, setEditingCourier] = useState<Courier | null>(null)
   const [deletingCourier, setDeletingCourier] = useState<Courier | null>(null)
+
+  // In-App Order Editing & Cancellation States
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null)
+  const [deletingOrder, setDeletingOrder] = useState<Order | null>(null)
 
   // Dedicated Route Specific States
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -1189,6 +1195,29 @@ export default function GhostCrmDashboard() {
         isRtl={isRtl}
       />
 
+      <OrderDraftModal
+        isOpen={!!editingOrder}
+        onClose={() => setEditingOrder(null)}
+        order={editingOrder}
+        onSuccess={(msg) => {
+          setNotification(msg)
+          fetchData()
+        }}
+        isRtl={isRtl}
+        couriers={couriers}
+      />
+
+      <OrderDeleteModal
+        isOpen={!!deletingOrder}
+        onClose={() => setDeletingOrder(null)}
+        order={deletingOrder}
+        onSuccess={(msg) => {
+          setNotification(msg)
+          fetchData()
+        }}
+        isRtl={isRtl}
+      />
+
       {/* ======================================================== */}
       {/* MODAL 1: STOCK ADJUSTMENT                                 */}
       {/* ======================================================== */}
@@ -2032,6 +2061,34 @@ export default function GhostCrmDashboard() {
                 </pre>
               </div>
             )}
+
+            {/* Quick Actions in Drawer: Edit Draft & Cancel Order */}
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  const targetOrder = selectedOrderForDrawer
+                  setSelectedOrderForDrawer(null)
+                  setEditingOrder(targetOrder)
+                }}
+                className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-[#4352E8] dark:text-indigo-400 font-bold text-xs transition cursor-pointer border border-indigo-200 dark:border-indigo-800/40"
+              >
+                <EditIcon className="w-4 h-4" />
+                <span>{isRtl ? 'ערוך טיוטה והזמנה' : 'Edit Draft & Order'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const targetOrder = selectedOrderForDrawer
+                  setSelectedOrderForDrawer(null)
+                  setDeletingOrder(targetOrder)
+                }}
+                className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 font-bold text-xs transition cursor-pointer border border-rose-200 dark:border-rose-800/40"
+              >
+                <TrashIcon className="w-4 h-4" />
+                <span>{isRtl ? 'בטל ומחק משלוח' : 'Cancel & Delete'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2602,8 +2659,8 @@ export default function GhostCrmDashboard() {
         className="flex-1 min-w-0 max-w-full p-4 sm:p-8 space-y-6 overflow-y-auto overflow-x-hidden no-scrollbar"
       >
         {/* Top Header & Dynamic Navigation Title */}
-        <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+        <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-1">
+          <div className="flex items-center gap-3 min-w-0">
             {/* Hamburger Button for Mobile View */}
             <button
               type="button"
@@ -2615,8 +2672,8 @@ export default function GhostCrmDashboard() {
               <MenuIcon className="w-5 h-5 text-slate-800 dark:text-slate-200" />
             </button>
 
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white transition-colors">
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white transition-colors truncate">
                 {activeNav === 'dashboard'
                   ? 'Persian Team Management • Executive Dashboard'
                   : activeNav === 'orders'
@@ -2650,14 +2707,16 @@ export default function GhostCrmDashboard() {
           </div>
 
           {/* Quick Actions Strip */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 shrink-0">
             {/* Dark / Light / System Theme Toggler */}
-            <ThemeToggle lang={lang} align="end" />
+            <ThemeToggle lang={lang} align="end" className="!h-9 flex items-center" />
 
+            {/* Refresh Data Button */}
             <button
+              type="button"
               onClick={fetchData}
               disabled={refreshing}
-              className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-xs cursor-pointer"
+              className="h-9 w-9 flex items-center justify-center rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-xs cursor-pointer shrink-0"
               title={t.refreshData}
             >
               <RefreshIcon className={`w-4 h-4 ${refreshing ? 'animate-spin text-[#4352E8]' : ''}`} />
@@ -2665,42 +2724,46 @@ export default function GhostCrmDashboard() {
 
             {/* One-Tap Bilingual Toggle */}
             <button
+              type="button"
               onClick={toggleLanguage}
-              className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-xs flex items-center gap-2 cursor-pointer"
+              className="h-9 px-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0 whitespace-nowrap"
+              title={lang === 'en' ? 'החלף לעברית (RTL)' : 'Switch to English (LTR)'}
             >
-              <GlobeIcon className="w-4 h-4 text-[#4352E8]" />
-              <span>{lang === 'en' ? '🌐 עברית (RTL)' : '🌐 English (LTR)'}</span>
+              <GlobeIcon className="w-3.5 h-3.5 text-[#4352E8] dark:text-indigo-400 shrink-0" />
+              <span className="whitespace-nowrap">{lang === 'en' ? 'עברית (RTL)' : 'English (LTR)'}</span>
             </button>
 
             {/* End-of-Day Shift Closeout (Z-Report) Action Button */}
             <button
+              type="button"
               onClick={() => setShowDayCloseoutModal(true)}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white text-xs font-black transition shadow-md shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer shrink-0"
+              className="h-9 px-3.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white text-xs font-black transition shadow-md shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer shrink-0 whitespace-nowrap"
               title="סגירת יום עבודה (דוח Z) ואיפוס הקופה למחר"
             >
-              <span className="text-sm">🌙</span>
-              <span>{t.closeDayBtn || 'Close Day (Z-Report)'}</span>
+              <span className="text-sm shrink-0">🌙</span>
+              <span className="whitespace-nowrap">{t.closeDayBtn || 'Close Day (Z-Report)'}</span>
             </button>
 
             {/* Quick Switch to /admin Courier Service & Masked Calling */}
             <Link
               href="/admin"
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-xs cursor-pointer group"
+              className="hidden xl:flex h-9 items-center gap-1.5 px-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-xs cursor-pointer group shrink-0 whitespace-nowrap"
               title="Open Courier Masking & Service Admin (/admin)"
             >
-              <PhoneIcon className="w-3.5 h-3.5 text-[#4352E8] group-hover:scale-110 transition" />
-              <span>Courier Admin</span>
+              <PhoneIcon className="w-3.5 h-3.5 text-[#4352E8] group-hover:scale-110 transition shrink-0" />
+              <span className="whitespace-nowrap">Courier Admin</span>
               <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded font-semibold">/admin</span>
             </Link>
 
             {activeNav === 'orders' && (
               <button
+                type="button"
                 onClick={handleExportCSV}
                 disabled={filteredOrders.length === 0}
-                className="px-4 py-2 rounded-xl bg-[#1E2235] hover:bg-[#151928] text-white text-xs font-semibold shadow-xs transition flex items-center gap-2 cursor-pointer disabled:opacity-40"
+                className="h-9 px-3.5 rounded-xl bg-[#1E2235] hover:bg-[#151928] text-white text-xs font-semibold shadow-xs transition flex items-center gap-2 cursor-pointer disabled:opacity-40 shrink-0 whitespace-nowrap"
               >
-                <DownloadIcon className="w-4 h-4" />
-                <span>{t.exportToExcel}</span>
+                <DownloadIcon className="w-3.5 h-3.5 shrink-0" />
+                <span className="whitespace-nowrap">{t.exportToExcel}</span>
               </button>
             )}
           </div>
@@ -2818,6 +2881,8 @@ export default function GhostCrmDashboard() {
             couriers={couriers}
             onAssignCourier={handleAssignCourier}
             shiftStartTime={shiftStartTime}
+            onEditOrder={(order) => setEditingOrder(order)}
+            onDeleteOrder={(order) => setDeletingOrder(order)}
           />
         )}
 

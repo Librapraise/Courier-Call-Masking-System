@@ -13,6 +13,7 @@ import {
   XIcon
 } from '@/components/crm/CrmIcons'
 import { Product, Brand, Courier, Order } from '@/components/crm/CrmRouteViews'
+import { parseSingleOrderMessage, ParsedDeliveryOrder } from '@/lib/crm/parser'
 
 // ========================================================
 // 1. PRODUCT CREATE / EDIT MODAL
@@ -1000,3 +1001,538 @@ export function CourierDeleteModal({
     </div>
   )
 }
+
+// ========================================================
+// 6. ORDER DRAFT / EDIT MESSAGE MODAL
+// ========================================================
+export function OrderDraftModal({
+  isOpen,
+  onClose,
+  order,
+  onSuccess,
+  isRtl,
+  couriers = []
+}: {
+  isOpen: boolean
+  onClose: () => void
+  order: Order | null
+  onSuccess: (msg: string) => void
+  isRtl: boolean
+  couriers?: Courier[]
+}) {
+  const [activeMode, setActiveMode] = useState<'draft' | 'fields'>('draft')
+  const [rawText, setRawText] = useState('')
+  const [selectedCourierId, setSelectedCourierId] = useState<string>('')
+  
+  // Manual field states
+  const [manualAddress, setManualAddress] = useState('')
+  const [manualCity, setManualCity] = useState('')
+  const [manualPrice, setManualPrice] = useState('')
+  const [manualMenuItems, setManualMenuItems] = useState('')
+  const [manualActualItems, setManualActualItems] = useState('')
+
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Initialize modal data
+  useEffect(() => {
+    if (order) {
+      const initialText = order.raw_message?.trim() || [
+        order.address || '',
+        order.crm_customers?.phone_number || '',
+        order.crm_customers?.telegram_handle || '',
+        `מותג: ${order.brands?.name || ''}`,
+        `פריטים: ${order.menu_items || order.actual_items || ''}`,
+        `מחיר: ₪${order.total_price || 0} כולל משלוח`
+      ].filter(Boolean).join('\n')
+
+      setRawText(initialText)
+      setSelectedCourierId(order.courier_id || '')
+
+      setManualAddress(order.address || '')
+      setManualCity(order.city || '')
+      setManualPrice(order.total_price ? String(order.total_price) : '')
+      setManualMenuItems(order.menu_items || '')
+      setManualActualItems(order.actual_items || '')
+    } else {
+      setRawText('')
+      setSelectedCourierId('')
+    }
+    setError(null)
+  }, [order, isOpen])
+
+  // Live real-time parsing of draft text
+  const liveParsed = useMemo<ParsedDeliveryOrder | null>(() => {
+    if (!rawText.trim()) return null
+    try {
+      return parseSingleOrderMessage(rawText)
+    } catch {
+      return null
+    }
+  }, [rawText])
+
+  if (!isOpen || !order) return null
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSubmitting(true)
+    setError(null)
+
+    try {
+      const payload: Record<string, any> = {
+        action: 'UPDATE_ORDER',
+        orderId: order.id,
+        courierId: selectedCourierId || null
+      }
+
+      if (activeMode === 'draft') {
+        if (!rawText.trim()) {
+          setError('Message text cannot be empty.')
+          setIsSubmitting(false)
+          return
+        }
+        payload.rawMessage = rawText.trim()
+      } else {
+        payload.manualFields = {
+          address: manualAddress.trim(),
+          city: manualCity.trim(),
+          totalPrice: Number(manualPrice) || 0,
+          menuItems: manualMenuItems.trim(),
+          actualItems: manualActualItems.trim()
+        }
+      }
+
+      const res = await fetch('/api/crm/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to update order.')
+
+      onSuccess(
+        isRtl
+          ? `המשלוח עבור "${data.order?.address || order.address}" עודכן והמלאי חושב מחדש.`
+          : `Order for "${data.order?.address || order.address}" updated and inventory reconciled.`
+      )
+      onClose()
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 sm:p-4 animate-in fade-in overflow-y-auto">
+      <div
+        className="w-full max-w-3xl lg:max-w-4xl rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 shadow-2xl p-5 sm:p-6 space-y-4 my-auto max-h-[92vh] overflow-y-auto"
+        dir={isRtl ? 'rtl' : 'ltr'}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 flex items-center justify-center text-[#4352E8] dark:text-indigo-400">
+              <EditIcon className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                {isRtl ? 'עריכת הזמנה וטיוטת הודעה' : 'Edit Order & Message Draft'}
+              </h3>
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                {isRtl
+                  ? 'שינוי פרטים, הוספת פריטים וסנכרון אוטומטי של מלאי המחסן'
+                  : 'Modify order items, pricing, address, and live inventory sync'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+          >
+            <XIcon className="w-4 h-4" />
+          </button>
+        </div>
+
+        {error && (
+          <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-400 text-xs font-semibold">
+            {error}
+          </div>
+        )}
+
+        {/* Mode Switcher & Courier Assignment Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="inline-flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveMode('draft')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                activeMode === 'draft'
+                  ? 'bg-white dark:bg-slate-800 text-[#4352E8] dark:text-indigo-400 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <span>📝</span>
+              <span>{isRtl ? 'עריכת טיוטת הודעה' : 'Edit Message Text'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveMode('fields')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                activeMode === 'fields'
+                  ? 'bg-white dark:bg-slate-800 text-[#4352E8] dark:text-indigo-400 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <span>⚙️</span>
+              <span>{isRtl ? 'עריכת שדות ידנית' : 'Manual Form Fields'}</span>
+            </button>
+          </div>
+
+          {/* Quick Courier Assignment Selector */}
+          <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/60 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shrink-0">
+            <span className="text-xs">🛵</span>
+            <label className="text-xs font-bold text-slate-600 dark:text-slate-300 whitespace-nowrap">
+              {isRtl ? 'שליח משובץ:' : 'Courier:'}
+            </label>
+            <select
+              value={selectedCourierId}
+              onChange={e => setSelectedCourierId(e.target.value)}
+              className="py-1 px-2.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-200 font-semibold focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 cursor-pointer min-w-[130px]"
+            >
+              <option value="">{isRtl ? 'ללא שליח (Unassigned)' : 'Unassigned'}</option>
+              {(couriers || []).map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {activeMode === 'draft' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Draft Textarea */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {isRtl ? 'תוכן הודעת המשלוח (טיוטה חיה):' : 'Delivery Message Text (Live Draft):'}
+                  </label>
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                    {isRtl ? 'כולל חוק הסלאש /' : 'Slash rule supported'}
+                  </span>
+                </div>
+                <textarea
+                  rows={9}
+                  value={rawText}
+                  onChange={e => setRawText(e.target.value)}
+                  placeholder={`זבולון גרז 1 ברחובות\n0542584240\n10 בזונים רפואי רפואי האני / 10g רפואי האני\n₪500 כולל משלוח`}
+                  className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 resize-none"
+                />
+                <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                  {isRtl
+                    ? '💡 עדכן כמויות, פריטים או מחיר ישירות בטקסט — המערכת תעדכן את המלאי בהתאם.'
+                    : '💡 Modify text directly — stock deductions & cash will be recalculated automatically.'}
+                </p>
+              </div>
+
+              {/* Live Parsed Preview Badge Card */}
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200/80 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-200/60 dark:border-slate-800 pb-2">
+                  <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    {isRtl ? 'זיהוי מערכת בזמן אמת:' : 'Live Parsed Output:'}
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 font-semibold font-mono">
+                    {liveParsed?.brand || 'מותג ברירת מחדל'}
+                  </span>
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                      📍 {isRtl ? 'יעד וכתובת' : 'Destination'}
+                    </span>
+                    <p className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                      {liveParsed?.customerName || order.address}
+                    </p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {isRtl ? 'עיר מזוהה:' : 'City:'} <strong className="text-slate-700 dark:text-slate-300">{liveParsed?.city || order.city}</strong>
+                    </p>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                      📞 {isRtl ? 'טלפון' : 'Phone'}
+                    </span>
+                    <p className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                      {liveParsed?.phoneNumber || order.crm_customers?.phone_number || '—'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                      📦 {isRtl ? 'פריטים שיורדים מהמחסן' : 'Warehouse Stock Deductions'}
+                    </span>
+                    <p className="text-emerald-700 dark:text-emerald-400 font-bold text-[11px] bg-emerald-50/60 dark:bg-emerald-950/40 p-1.5 rounded-lg border border-emerald-200/50 dark:border-emerald-900/40">
+                      {liveParsed?.actualItems || order.actual_items || 'ללא ניכוי'}
+                    </p>
+                  </div>
+
+                  <div className="pt-1 flex items-center justify-between border-t border-slate-200/60 dark:border-slate-800">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                      💰 {isRtl ? 'סכום לגבייה:' : 'Cash Collected:'}
+                    </span>
+                    <span className="text-base font-black font-mono text-slate-900 dark:text-white">
+                      ₪{(liveParsed?.totalPrice ?? Number(order.total_price)).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="sm:col-span-2">
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  {isRtl ? 'כתובת לקוח / יעד *' : 'Delivery Address *'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={manualAddress}
+                  onChange={e => setManualAddress(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  {isRtl ? 'עיר' : 'City'}
+                </label>
+                <input
+                  type="text"
+                  value={manualCity}
+                  onChange={e => setManualCity(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  {isRtl ? 'מחיר לגבייה (₪) *' : 'Total Price (₪) *'}
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  step="any"
+                  value={manualPrice}
+                  onChange={e => setManualPrice(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  {isRtl ? 'תיאור פריטים בתפריט' : 'Menu Items'}
+                </label>
+                <input
+                  type="text"
+                  value={manualMenuItems}
+                  onChange={e => setManualMenuItems(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  {isRtl ? 'פריטי מחסן בפועל' : 'Actual Warehouse Items'}
+                </label>
+                <input
+                  type="text"
+                  value={manualActualItems}
+                  onChange={e => setManualActualItems(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold text-emerald-600 dark:text-emerald-400 focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Footer Actions */}
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSubmitting}
+              className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold text-xs hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+            >
+              {isRtl ? 'ביטול' : 'Cancel'}
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-5 py-2 rounded-xl bg-[#4352E8] hover:bg-[#3442cb] text-white font-bold text-xs transition shadow-md shadow-indigo-200 dark:shadow-indigo-950 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshIcon className="w-3.5 h-3.5 animate-spin" />
+                  <span>{isRtl ? 'מעדכן משלוח ומלאי...' : 'Reconciling Stock & Saving...'}</span>
+                </>
+              ) : (
+                <span>{isRtl ? '💾 שמור שינויים ועדכן מלאי' : '💾 Save & Reconcile Stock'}</span>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ========================================================
+// 7. ORDER DELETE / CANCEL CONFIRMATION MODAL
+// ========================================================
+export function OrderDeleteModal({
+  isOpen,
+  onClose,
+  order,
+  onSuccess,
+  isRtl
+}: {
+  isOpen: boolean
+  onClose: () => void
+  order: Order | null
+  onSuccess: (msg: string) => void
+  isRtl: boolean
+}) {
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  if (!isOpen || !order) return null
+
+  const handleDelete = async () => {
+    try {
+      setIsDeleting(true)
+      setError(null)
+
+      const res = await fetch('/api/crm/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'DELETE_ORDER',
+          orderId: order.id
+        })
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to delete order.')
+
+      onSuccess(
+        isRtl
+          ? `המשלוח עבור "${order.address}" בוטל בהצלחה. המוצרים הוחזרו למלאי המחסן והקופה עודכנה.`
+          : `Order for "${order.address}" deleted. Stock was restored to warehouse and cash updated.`
+      )
+      onClose()
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in">
+      <div
+        className="w-full max-w-md rounded-2xl bg-white dark:bg-[#0B0F17] border border-rose-100 dark:border-rose-950/40 shadow-2xl p-6 space-y-4"
+        dir={isRtl ? 'rtl' : 'ltr'}
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20 flex items-center justify-center text-rose-600 dark:text-rose-400">
+              <TrashIcon className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                {isRtl ? 'ביטול ומחיקת משלוח' : 'Cancel & Delete Order'}
+              </h3>
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                {isRtl ? 'החזרת מלאי אוטומטית למחסן' : 'Automatic stock restoration'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+          >
+            <XIcon className="w-4 h-4" />
+          </button>
+        </div>
+
+        {error && (
+          <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-400 text-xs font-semibold">
+            {error}
+          </div>
+        )}
+
+        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300 space-y-3">
+          <p className="leading-relaxed">
+            {isRtl ? (
+              <>האם אתה בטוח שברצונך למחוק את המשלוח עבור <strong className="text-slate-900 dark:text-white font-bold">{order.address}</strong>?</>
+            ) : (
+              <>Are you sure you want to cancel the order for <strong className="text-slate-900 dark:text-white font-bold">{order.address}</strong>?</>
+            )}
+          </p>
+
+          <div className="p-2.5 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200/50 dark:border-emerald-900/40 text-[11px] space-y-1">
+            <span className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+              <span>📦</span> {isRtl ? 'מוצרים שיוחזרו אוטומטית למלאי המחסן:' : 'Stock to be restored:'}
+            </span>
+            <p className="text-emerald-700 dark:text-emerald-400 font-semibold pl-4">
+              {order.actual_items || '—'}
+            </p>
+          </div>
+
+          <div className="p-2.5 rounded-lg bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200/50 dark:border-amber-900/40 text-[11px] space-y-1">
+            <span className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1">
+              <span>💰</span> {isRtl ? 'השפעה כספית על קופת השליח:' : 'Financial deduction:'}
+            </span>
+            <p className="text-amber-700 dark:text-amber-400 font-semibold pl-4">
+              -₪{Number(order.total_price || 0).toLocaleString()} {isRtl ? 'ייגרעו מקופת השליחים היומית' : 'deducted from courier cash'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isDeleting}
+            className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold text-xs hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+          >
+            {isRtl ? 'אל תמחק (חזור)' : 'Keep Order'}
+          </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-md shadow-rose-200 dark:shadow-rose-950 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            {isDeleting ? (
+              <>
+                <RefreshIcon className="w-3.5 h-3.5 animate-spin" />
+                <span>{isRtl ? 'מוחק ומחזיר מלאי...' : 'Deleting & Restoring...'}</span>
+              </>
+            ) : (
+              <span>{isRtl ? '🗑️ מחק משלוח והחזר מלאי' : '🗑️ Cancel & Restore Stock'}</span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
