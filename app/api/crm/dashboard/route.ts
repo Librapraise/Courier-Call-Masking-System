@@ -575,7 +575,15 @@ export async function POST(req: Request) {
     }
 
     if (action === 'SETTLE_COURIER') {
-      const { courierId, grossCollected, bonusAmount, notes } = body
+      const {
+        courierId,
+        grossCollected,
+        bonusAmount,
+        notes,
+        batYamCount: reqBatYamCount,
+        standardCount: reqStandardCount,
+        deliveryFees: reqDeliveryFees
+      } = body
       if (!courierId) {
         return NextResponse.json({ error: 'Missing courierId' }, { status: 400 })
       }
@@ -601,7 +609,17 @@ export async function POST(req: Request) {
 
       const { data: ordersToSettle } = await supabaseAdmin
         .from('crm_orders')
-        .select('id, total_price, city, address')
+        .select(`
+          id,
+          total_price,
+          city,
+          address,
+          raw_message,
+          crm_customers:customer_id (
+            address_name,
+            city
+          )
+        `)
         .eq('courier_id', courierId)
         .gt('order_date', shiftStartIso)
         .eq('is_settled', false)
@@ -644,20 +662,45 @@ export async function POST(req: Request) {
       // Bat Yam = ₪50/delivery, all others = ₪100/delivery
       const BAT_YAM_FEE = 50
       const STANDARD_FEE = 100
-      const BAT_YAM_CITY = 'בת ים'
 
       let batYamCount = 0
       let standardCount = 0
-      for (const o of orders) {
-        const isBatYam =
-          (o.city || '').includes('בת ים') ||
-          (o.address || '').includes('בת ים') ||
-          (o.address || '').includes('יוספטל')
-        if (isBatYam) batYamCount++
-        else standardCount++
+
+      // If client explicitly passed validated batYamCount, honor it directly
+      if (typeof reqBatYamCount === 'number' && reqBatYamCount >= 0) {
+        batYamCount = Math.min(reqBatYamCount, orders.length)
+        standardCount = Math.max(0, orders.length - batYamCount)
+      } else {
+        for (const o of orders) {
+          const combined = [
+            o.city || '',
+            o.address || '',
+            (o as any).crm_customers?.city || '',
+            (o as any).crm_customers?.address_name || '',
+            (o as any).raw_message || ''
+          ].join(' ').toLowerCase()
+
+          const isBatYam =
+            combined.includes('בת ים') ||
+            combined.includes('בת-ים') ||
+            combined.includes('בתים') ||
+            combined.includes('יוספטל') ||
+            combined.includes('יוסף טל') ||
+            combined.includes('בלפור') ||
+            combined.includes('הקוממיות') ||
+            combined.includes('bat yam') ||
+            combined.includes('bat-yam') ||
+            combined.includes('batyam') ||
+            combined.includes('yoseftal')
+
+          if (isBatYam) batYamCount++
+          else standardCount++
+        }
       }
 
-      const deliveryFees = batYamCount * BAT_YAM_FEE + standardCount * STANDARD_FEE
+      const deliveryFees = typeof reqDeliveryFees === 'number' && reqDeliveryFees >= 0
+        ? reqDeliveryFees
+        : (batYamCount * BAT_YAM_FEE + standardCount * STANDARD_FEE)
       const courierPay  = deliveryFees + bonus
       const netToWarehouse = Math.max(0, grossCollected - courierPay)
       const totalOrderValue = orders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
@@ -671,10 +714,11 @@ export async function POST(req: Request) {
         .eq('is_settled', false)
 
       // Record the full financial breakdown in cash_settlements
+      const batYamBreakdown = batYamCount > 0 ? ` (${standardCount} רגיל ₪${standardCount * STANDARD_FEE} + ${batYamCount} בת ים ₪${batYamCount * BAT_YAM_FEE})` : ''
       const settlementNotes = notes || (
         isAdditionalRun
-          ? `סגירת קופה (סבב נוסף) — ${orders.length} משלוחים בסבב זה | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse} (נסגרו מוקדם יותר: ${earlierCount} משלוחים / נטו ₪${displayEarlierNet.toLocaleString()})`
-          : `סגירת קופה — ${orders.length} משלוחים | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse}`
+          ? `סגירת קופה (סבב נוסף) — ${orders.length} משלוחים${batYamBreakdown} בסבב זה | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse} (נסגרו מוקדם יותר: ${earlierCount} משלוחים / נטו ₪${displayEarlierNet.toLocaleString()})`
+          : `סגירת קופה — ${orders.length} משלוחים${batYamBreakdown} | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse}`
       )
 
       const { error: insertV2Error } = await supabaseAdmin
@@ -884,7 +928,8 @@ export async function POST(req: Request) {
       const query = supabaseAdmin
         .from('crm_orders')
         .select(`
-          id, total_price, courier_id, city, address, is_settled, order_date,
+          id, total_price, courier_id, city, address, raw_message, is_settled, order_date,
+          crm_customers:customer_id (address_name, city),
           crm_couriers(id, name, phone_number, telegram_id)
         `)
       
@@ -941,10 +986,27 @@ export async function POST(req: Request) {
         entry.gross_collected += price
 
         if (cId !== 'unassigned') {
+          const combined = [
+            o.city || '',
+            o.address || '',
+            (o as any).crm_customers?.city || '',
+            (o as any).crm_customers?.address_name || '',
+            (o as any).raw_message || ''
+          ].join(' ').toLowerCase()
+
           const isBatYam =
-            (o.city || '').includes('בת ים') ||
-            (o.address || '').includes('בת ים') ||
-            (o.address || '').includes('יוספטל')
+            combined.includes('בת ים') ||
+            combined.includes('בת-ים') ||
+            combined.includes('בתים') ||
+            combined.includes('יוספטל') ||
+            combined.includes('יוסף טל') ||
+            combined.includes('בלפור') ||
+            combined.includes('הקוממיות') ||
+            combined.includes('bat yam') ||
+            combined.includes('bat-yam') ||
+            combined.includes('batyam') ||
+            combined.includes('yoseftal')
+
           if (isBatYam) {
             entry.bat_yam_count += 1
             entry.courier_fee += BAT_YAM_FEE

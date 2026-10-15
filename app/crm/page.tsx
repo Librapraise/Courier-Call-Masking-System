@@ -232,6 +232,7 @@ export default function GhostCrmDashboard() {
   const [settlingCourier, setSettlingCourier] = useState<Courier | null>(null)
   const [grossInput, setGrossInput] = useState<string>('')
   const [bonusInput, setBonusInput] = useState<string>('0')
+  const [batYamCountInput, setBatYamCountInput] = useState<number>(0)
   const [settlementNotes, setSettlementNotes] = useState<string>('')
   const [isSubmittingSettle, setIsSubmittingSettle] = useState(false)
   const [isPurgingDemo, setIsPurgingDemo] = useState(false)
@@ -576,6 +577,54 @@ export default function GhostCrmDashboard() {
       return () => clearTimeout(timer)
     }
   }, [notification])
+  // Helper to detect if an order or address is in Bat Yam (₪50 courier fee vs ₪100 standard)
+  const isBatYamOrder = (o: {
+    city?: string | null
+    address?: string | null
+    raw_message?: string | null
+    crm_customers?: { address_name?: string | null; city?: string | null } | null
+  }) => {
+    const combined = [
+      o.city || '',
+      o.address || '',
+      o.crm_customers?.city || '',
+      o.crm_customers?.address_name || '',
+      o.raw_message || ''
+    ].join(' ').toLowerCase()
+
+    return (
+      combined.includes('בת ים') ||
+      combined.includes('בת-ים') ||
+      combined.includes('בתים') ||
+      combined.includes('יוספטל') ||
+      combined.includes('יוסף טל') ||
+      combined.includes('בלפור') ||
+      combined.includes('הקוממיות') ||
+      combined.includes('bat yam') ||
+      combined.includes('bat-yam') ||
+      combined.includes('batyam') ||
+      combined.includes('yoseftal')
+    )
+  }
+
+  // When opening courier settlement modal, auto-detect Bat Yam deliveries in their active unsettled batch
+  useEffect(() => {
+    if (!settlingCourier) {
+      setBatYamCountInput(0)
+      return
+    }
+
+    const courierOrders = orders.filter(o => {
+      const cId = (o as any).crm_couriers?.id || (o as any).courier_id
+      if (cId !== settlingCourier.id) return false
+      if (o.is_settled) return false
+      if (shiftStartTime && o.order_date <= shiftStartTime) return false
+      return true
+    })
+
+    const detectedBatYam = courierOrders.filter(isBatYamOrder).length
+    setBatYamCountInput(detectedBatYam)
+  }, [settlingCourier, orders, shiftStartTime])
 
   // Phone Masking
   const maskPhoneNumber = (phone: string, isUnmasked: boolean) => {
@@ -680,10 +729,7 @@ export default function GhostCrmDashboard() {
       entry.gross_collected += price
 
       if (cId !== 'unassigned') {
-        const isBatYam =
-          (o.city || '').includes('בת ים') ||
-          (o.address || '').includes('בת ים') ||
-          (o.address || '').includes('יוספטל')
+        const isBatYam = isBatYamOrder(o)
         entry.courier_fee += isBatYam ? BAT_YAM_FEE : STANDARD_FEE
       }
     }
@@ -988,6 +1034,9 @@ export default function GhostCrmDashboard() {
           courierId: settlingCourier.id,
           grossCollected: gross,
           bonusAmount: bonus,
+          batYamCount: safeBatYamCount,
+          standardCount: safeStandardCount,
+          deliveryFees: previewDeliveryFees,
           notes: settlementNotes
         })
       })
@@ -1113,12 +1162,13 @@ export default function GhostCrmDashboard() {
     )
   }
 
-  // Computed settlement values (frontend preview using 100 NIS standard rate)
-  const settleOrderCount  = settlingCourier?.todayOrders || 0
-  const parsedGross       = parseFloat(grossInput) || 0
-  const parsedBonus       = Math.max(0, parseFloat(bonusInput) || 0)
-  // Preview: assume all are standard (backend will do exact Bat Yam split)
-  const previewDeliveryFees = settleOrderCount * 100
+  // Computed settlement values with accurate Bat Yam (₪50) and Standard (₪100) rates
+  const settleOrderCount    = settlingCourier?.todayOrders || 0
+  const parsedGross         = parseFloat(grossInput) || 0
+  const parsedBonus         = Math.max(0, parseFloat(bonusInput) || 0)
+  const safeBatYamCount     = Math.min(settleOrderCount, Math.max(0, batYamCountInput))
+  const safeStandardCount   = Math.max(0, settleOrderCount - safeBatYamCount)
+  const previewDeliveryFees = (safeStandardCount * 100) + (safeBatYamCount * 50)
   const previewCourierPay   = previewDeliveryFees + parsedBonus
   const previewNet          = Math.max(0, parsedGross - previewCourierPay)
 
@@ -1420,11 +1470,61 @@ export default function GhostCrmDashboard() {
                       {t.deliveryFeesBreakdown}
                     </p>
                     <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 font-semibold truncate">
-                      {settleOrderCount} × ₪100 = <span className="text-emerald-600 dark:text-emerald-400 font-black">₪{previewDeliveryFees.toLocaleString()}</span>
+                      {safeBatYamCount > 0 ? (
+                        <>
+                          {safeStandardCount} × ₪100 + {safeBatYamCount} × ₪50 = <span className="text-emerald-600 dark:text-emerald-400 font-black">₪{previewDeliveryFees.toLocaleString()}</span>
+                        </>
+                      ) : (
+                        <>
+                          {settleOrderCount} × ₪100 = <span className="text-emerald-600 dark:text-emerald-400 font-black">₪{previewDeliveryFees.toLocaleString()}</span>
+                        </>
+                      )}
                     </p>
-                    <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 truncate">
-                      (Bat Yam adjusted on confirm)
+                    <p className="text-[9px] sm:text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5 truncate">
+                      {safeBatYamCount > 0
+                        ? `(כולל ${safeBatYamCount} בת ים לפי ₪50)`
+                        : `(כל המשלוחים רגילים ₪100)`}
                     </p>
+                  </div>
+                </div>
+
+                {/* Bat Yam Adjustment Stepper */}
+                <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-800/60 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs">🌊</span>
+                      <span className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                        {isRtl ? 'משלוחי בת ים (₪50 למשלוח)' : 'Bat Yam Deliveries (₪50 each)'}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-amber-700 dark:text-amber-300/80 mt-0.5 truncate">
+                      {safeBatYamCount > 0
+                        ? (isRtl ? `${safeBatYamCount} בת ים (₪50) + ${safeStandardCount} רגיל (₪100)` : `${safeBatYamCount} Bat Yam (₪50) + ${safeStandardCount} Standard (₪100)`)
+                        : (isRtl ? `ללא משלוחי בת ים (כל ${settleOrderCount} המשלוחים לפי ₪100)` : `No Bat Yam deliveries (all ${settleOrderCount} at ₪100)`)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 bg-white dark:bg-slate-900 rounded-lg p-1 border border-amber-200 dark:border-amber-800">
+                    <button
+                      type="button"
+                      disabled={safeBatYamCount <= 0}
+                      onClick={() => setBatYamCountInput(prev => Math.max(0, prev - 1))}
+                      className="w-7 h-7 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-base flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
+                      title={isRtl ? 'הפחת משלוח בת ים (-1)' : 'Decrease Bat Yam (-1)'}
+                    >
+                      -
+                    </button>
+                    <span className="w-7 text-center font-mono font-black text-sm text-amber-900 dark:text-amber-200">
+                      {safeBatYamCount}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={safeBatYamCount >= settleOrderCount}
+                      onClick={() => setBatYamCountInput(prev => Math.min(settleOrderCount, prev + 1))}
+                      className="w-7 h-7 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-base flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
+                      title={isRtl ? 'הוסף משלוח בת ים (+1)' : 'Increase Bat Yam (+1)'}
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
 
