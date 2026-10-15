@@ -6,6 +6,7 @@ import { BRANDS_LIST } from '@/lib/crm/catalog-data'
 import { sendTelegramMessage } from '@/lib/crm/telegram-bot'
 import { formatPhoneForStorage } from '@/lib/utils/phone'
 import { isStaffUser } from '@/lib/auth/roles'
+import { getIsraelDateString, getIsraelMidnightIso } from '@/lib/crm/date-utils'
 
 function getLocalDayCloseouts(): any[] {
   try {
@@ -183,19 +184,17 @@ export async function GET() {
       }
     }
 
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const todayIso = today.toISOString()
+    const defaultShiftStart = getIsraelMidnightIso()
 
     const isRecentCloseout = latestDayCloseout && (new Date().getTime() - new Date(latestDayCloseout.created_at).getTime() < 36 * 3600 * 1000)
     const shiftStartIso = isRecentCloseout
       ? (latestDayCloseout.shift_end || latestDayCloseout.created_at)
-      : todayIso
+      : defaultShiftStart
 
     const allOrders = orders || []
     const todayOrders = isRecentCloseout
       ? allOrders.filter(o => o.order_date > shiftStartIso)
-      : allOrders.filter(o => o.order_date >= todayIso)
+      : allOrders.filter(o => o.order_date >= defaultShiftStart)
     const totalDeliveriesToday = todayOrders.length
     
     // Courier cash currently in the street/courier hands (UNSETTLED only)
@@ -565,16 +564,25 @@ export async function POST(req: Request) {
 
       const bonus = Math.max(0, Number(bonusAmount) || 0)
 
-      // Fetch today's unsettled orders WITH city for fee-rate split
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      const todayIso = today.toISOString()
+      // Determine active shift start for this courier
+      let shiftStartIso = getIsraelMidnightIso()
+      try {
+        const { data: latestCloseout } = await supabaseAdmin
+          .from('crm_day_closeouts')
+          .select('shift_end, created_at')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (latestCloseout && (Date.now() - new Date(latestCloseout.created_at).getTime() < 36 * 3600 * 1000)) {
+          shiftStartIso = latestCloseout.shift_end || latestCloseout.created_at
+        }
+      } catch (e) {}
 
       const { data: ordersToSettle } = await supabaseAdmin
         .from('crm_orders')
-        .select('id, total_price, city')
+        .select('id, total_price, city, address')
         .eq('courier_id', courierId)
-        .gte('order_date', todayIso)
+        .gt('order_date', shiftStartIso)
         .eq('is_settled', false)
 
       const orders = ordersToSettle || []
@@ -585,26 +593,26 @@ export async function POST(req: Request) {
         }, { status: 400 })
       }
 
-      // Query previously settled orders today for this courier to detect incremental multi-runs
+      // Query previously settled orders in this shift for this courier to detect incremental multi-runs
       const { data: earlierSettledOrders } = await supabaseAdmin
         .from('crm_orders')
         .select('id, total_price')
         .eq('courier_id', courierId)
-        .gte('order_date', todayIso)
+        .gt('order_date', shiftStartIso)
         .eq('is_settled', true)
 
       const earlierCount = earlierSettledOrders?.length || 0
       const earlierSettledTotal = (earlierSettledOrders || []).reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
       const isAdditionalRun = earlierCount > 0
 
-      // Query actual net cash previously received by warehouse from this courier today
-      const todayDateStr = new Date().toISOString().split('T')[0]
+      // Query actual net cash previously received by warehouse from this courier in this shift
+      const todayDateStr = getIsraelDateString()
       const { data: earlierSettlements } = await supabaseAdmin
         .from('cash_settlements')
         .select('amount_received, net_expected, gross_collected')
         .eq('courier_id', courierId)
         .eq('status', 'SETTLED')
-        .or(`settlement_date.eq.${todayDateStr},created_at.gte.${todayIso}`)
+        .or(`settlement_date.eq.${todayDateStr},created_at.gte.${shiftStartIso}`)
 
       const earlierNetToWarehouse = (earlierSettlements || []).reduce(
         (sum, s) => sum + (Number(s.amount_received ?? s.net_expected ?? 0)),
@@ -620,8 +628,11 @@ export async function POST(req: Request) {
       let batYamCount = 0
       let standardCount = 0
       for (const o of orders) {
-        const city = (o.city || '').trim()
-        if (city === BAT_YAM_CITY) batYamCount++
+        const isBatYam =
+          (o.city || '').includes('בת ים') ||
+          (o.address || '').includes('בת ים') ||
+          (o.address || '').includes('יוספטל')
+        if (isBatYam) batYamCount++
         else standardCount++
       }
 
@@ -635,7 +646,7 @@ export async function POST(req: Request) {
         .from('crm_orders')
         .update({ is_settled: true })
         .eq('courier_id', courierId)
-        .gte('order_date', todayIso)
+        .gt('order_date', shiftStartIso)
         .eq('is_settled', false)
 
       // Record the full financial breakdown in cash_settlements
@@ -840,9 +851,7 @@ export async function POST(req: Request) {
         if (localCo.length > 0) latestCloseout = localCo[0]
       }
 
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      const defaultShiftStart = today.toISOString()
+      const defaultShiftStart = getIsraelMidnightIso()
       const isCloseoutRecent = latestCloseout && (new Date().getTime() - new Date(latestCloseout.created_at).getTime() < 36 * 3600 * 1000)
       const shiftStart = isCloseoutRecent
         ? (latestCloseout.shift_end || latestCloseout.created_at)
@@ -866,8 +875,9 @@ export async function POST(req: Request) {
       const totalOrders = orders.length
 
       // 3. Compute detailed per-courier breakdown
+      // Standard = ₪100, Bat Yam = ₪50
       const STANDARD_FEE = 100
-      const BAT_YAM_FEE = 120
+      const BAT_YAM_FEE = 50
 
       const courierMap = new Map<string, {
         courier_id: string
@@ -910,7 +920,10 @@ export async function POST(req: Request) {
         entry.gross_collected += price
 
         if (cId !== 'unassigned') {
-          const isBatYam = (o.city || '').includes('בת ים') || (o.address || '').includes('בת ים')
+          const isBatYam =
+            (o.city || '').includes('בת ים') ||
+            (o.address || '').includes('בת ים') ||
+            (o.address || '').includes('יוספטל')
           if (isBatYam) {
             entry.bat_yam_count += 1
             entry.courier_fee += BAT_YAM_FEE
@@ -971,7 +984,7 @@ export async function POST(req: Request) {
       // 5. Save the Day Closeout record
       const closeoutRecord = {
         id: crypto.randomUUID(),
-        closeout_date: new Date().toISOString().split('T')[0],
+        closeout_date: getIsraelDateString(),
         shift_start: shiftStart,
         shift_end: shiftEnd,
         total_orders: totalOrders,
@@ -1001,52 +1014,78 @@ export async function POST(req: Request) {
         timeZone: 'Asia/Jerusalem',
         day: '2-digit',
         month: '2-digit',
-        year: 'numeric',
+        year: 'numeric'
+      })
+      const closeTimeFormatted = new Date(shiftEnd).toLocaleString('he-IL', {
+        timeZone: 'Asia/Jerusalem',
         hour: '2-digit',
         minute: '2-digit'
       })
 
-      const courierListFormatted = courierBreakdown
+      // Courier breakdown cards formatted cleanly for mobile screens
+      const courierWarehouseCards = courierBreakdown
         .filter(c => c.courier_id !== 'unassigned')
-        .map((c, i) =>
-          `• *${c.courier_name}:* ${c.orders_count} משלוחים | גבה ₪${c.gross_collected.toLocaleString()} | עמלה ₪${c.courier_fee.toLocaleString()} | *נטו לכספת: ₪${c.net_to_safe.toLocaleString()}*`
-        )
-        .join('\n') || 'ללא פעילות שליחים'
+        .map(c => {
+          const batYamStr = c.bat_yam_count > 0 ? ` (כולל ${c.bat_yam_count} בת ים)` : ''
+          return (
+            `🛵 *${c.courier_name}* • ${c.orders_count} משלוחים${batYamStr}\n` +
+            `  ▫️ גבייה ברוטו: ₪${c.gross_collected.toLocaleString()}\n` +
+            `  ▫️ עמלת שליח: ₪${c.courier_fee.toLocaleString()}\n` +
+            `  📥 *מעטפה לגבייה לכספת: ₪${c.net_to_safe.toLocaleString()}*`
+          )
+        })
+        .join('\n\n') || 'ללא פעילות שליחים'
+
+      const courierAccountantCards = courierBreakdown
+        .filter(c => c.courier_id !== 'unassigned')
+        .map(c => {
+          const batYamStr = c.bat_yam_count > 0 ? ` (כולל ${c.bat_yam_count} בת ים × ₪50)` : ''
+          return (
+            `🛵 *${c.courier_name}* • ${c.orders_count} משלוחים\n` +
+            `  ▫️ גבייה ברוטו: ₪${c.gross_collected.toLocaleString()}\n` +
+            `  ▫️ עמלת שליח: ₪${c.courier_fee.toLocaleString()}${batYamStr}\n` +
+            `  💵 *נטו לעסק: ₪${c.net_to_safe.toLocaleString()}*`
+          )
+        })
+        .join('\n\n') || 'ללא פעילות שליחים'
 
       // Message 1: To Warehouseman (Physical Cash Envelopes Collection & Safe Deposit)
       const warehouseMessage =
-        `🌙 *דוח סגירת יום — מחסנאי וכספת (Z-Report)*\n` +
-        `📅 *מועד סגירת יום:* ${closeDateFormatted}\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `📦 *סה״כ משלוחים שסופקו היום:* ${totalOrders}\n` +
-        `💰 *סך גבייה כולל מלקוחות:* ₪${totalGross.toLocaleString()}\n` +
-        `🛵 *סה״כ עמלות שליחים ששולמו:* ₪${totalCourierPay.toLocaleString()}\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `💵 *סך נטו מזומן שחייב להיות בכספת: ₪${totalNetToSafe.toLocaleString()}*\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `📋 *פירוט מעטפות מזומן לגבייה מכל שליח:*\n` +
-        `${courierListFormatted}\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🌙 *דוח סגירת יום וכספת | דוח Z*\n` +
+        `📅 *תאריך:* ${closeDateFormatted} • *שעה:* ${closeTimeFormatted}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `📦 *סיכום סבב משלוחים:*\n` +
+        `▫️ סה״כ משלוחים שסופקו: *${totalOrders}*\n` +
+        `▫️ סך גבייה מלקוחות: *₪${totalGross.toLocaleString()}*\n` +
+        `▫️ סך עמלות שליחים ששולמו: *₪${totalCourierPay.toLocaleString()}*\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `💵 *סך נטו מזומן להפקדה בכספת:*\n` +
+        `💰 *₪${totalNetToSafe.toLocaleString()}*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `📋 *פירוט מעטפות מזומן לגבייה מכל שליח:*\n\n` +
+        `${courierWarehouseCards}\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
         (notes ? `📝 *הערות מנהל משמרת:* ${notes}\n\n` : '') +
         `🔒 *חובה על המחסנאי לוודא קבלת כל המעטפות במזומן ונעילתן בכספת.*`
 
       // Message 2: To Accounting Manager (Full Financial Audit Report)
       const accountantMessage =
-        `📊 *דוח יומי פיננסי — הנהלת חשבונות (Z-Report)*\n` +
-        `📅 *מועד סגירה:* ${closeDateFormatted}\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `📈 *סיכום פעילות עסקית ופיננסית:*\n` +
-        `• *סה״כ הזמנות שנמסרו:* ${totalOrders}\n` +
-        `• *מחזור גבייה ברוטו (מזומן):* ₪${totalGross.toLocaleString()}\n` +
-        `• *הוצאות עמלות שליחים:* ₪${totalCourierPay.toLocaleString()}\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `💵 *רווח נטו במזומן שהופקד לעסק: ₪${totalNetToSafe.toLocaleString()}*\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `👥 *פירוט הכנסות ועמלות לפי שליח:*\n` +
-        `${courierListFormatted}\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📊 *דוח יומי פיננסי — הנהלת חשבונות | דוח Z*\n` +
+        `📅 *תאריך:* ${closeDateFormatted} • *שעה:* ${closeTimeFormatted}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `📈 *סיכום פיננסי יומי:*\n` +
+        `▫️ סה״כ הזמנות שנמסרו: *${totalOrders}*\n` +
+        `▫️ מחזור גבייה ברוטו (מזומן): *₪${totalGross.toLocaleString()}*\n` +
+        `▫️ הוצאות עמלות שליחים: *₪${totalCourierPay.toLocaleString()}*\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `💵 *רווח נטו במזומן שהופקד לעסק:*\n` +
+        `💰 *₪${totalNetToSafe.toLocaleString()}*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `👥 *פירוט הכנסות ועמלות לפי שליח:*\n\n` +
+        `${courierAccountantCards}\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
         (notes ? `📝 *הערות מנהל:* ${notes}\n\n` : '') +
-        `✅ *סטטוס משמרת:* סגירת יום רשמית הושלמה. כל ההזמנות סומנו כמיושבות והקופה אופסה לקראת מחר.`
+        `✅ *סטטוס משמרת:* סגירת יום הושלמה בהצלחה. הקופה אופסה ליום חדש.`
 
       // Resolve recipient Telegram IDs
       const warehouseTelegramIds = new Set<string>()

@@ -24,6 +24,7 @@ import {
   SettingsIcon
 } from '@/components/crm/CrmIcons'
 import { ParsedDeliveryOrder } from '@/lib/crm/parser'
+import { getIsraelDateString } from '@/lib/crm/date-utils'
 
 export interface Customer {
   id: string
@@ -653,7 +654,8 @@ export function OrdersRouteView({
   setCopiedId,
   setSelectedOrderForDrawer,
   couriers = [],
-  onAssignCourier
+  onAssignCourier,
+  shiftStartTime
 }: {
   orders: Order[]
   filteredOrders: Order[]
@@ -671,15 +673,19 @@ export function OrdersRouteView({
   setSelectedOrderForDrawer: (o: Order) => void
   couriers?: Courier[]
   onAssignCourier?: (orderId: string, courierId: string | null) => Promise<void>
+  shiftStartTime?: string | null
 }) {
-  const todayStr = new Date().toISOString().split('T')[0]
-  const todayOrders = orders.filter(o => {
+  const israelTodayStr = getIsraelDateString()
+  const activeShiftOrders = orders.filter(o => {
     if (!o.order_date) return false
-    return o.order_date.startsWith(todayStr) || new Date(o.order_date).toDateString() === new Date().toDateString()
+    if (shiftStartTime) {
+      return o.order_date > shiftStartTime
+    }
+    return o.order_date.startsWith(israelTodayStr) || new Date(o.order_date).toDateString() === new Date().toDateString()
   })
-  const todayOrdersTotal = todayOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
-  const todayTotalValue = Math.max(metrics.totalCashToday || 0, todayOrdersTotal)
-  const todayOrdersCount = Math.max(metrics.totalDeliveriesToday || 0, todayOrders.length)
+  const shiftOrdersTotal = activeShiftOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
+  const todayTotalValue = metrics.totalCashToday ?? shiftOrdersTotal
+  const todayOrdersCount = metrics.totalDeliveriesToday ?? activeShiftOrders.length
 
   return (
     <div className="space-y-6">

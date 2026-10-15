@@ -3,6 +3,7 @@ import { parseDeliveryMessage } from '@/lib/crm/parser'
 import { ingestParsedDelivery } from '@/lib/crm/ingestion-service'
 import { sendTelegramMessage, formatBatchReceipt } from '@/lib/crm/telegram-bot'
 import { supabaseAdmin } from '@/lib/supabase/server'
+import { getIsraelMidnightIso } from '@/lib/crm/date-utils'
 
 export async function POST(req: NextRequest) {
   try {
@@ -114,22 +115,43 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Calculate total courier cash collected today across all orders
+    // 4. Calculate total courier cash collected in active shift (since last Z-report / day closeout)
     let totalCashToday = totalBatchCash
     try {
-      const todayStart = new Date()
-      todayStart.setHours(0, 0, 0, 0)
+      // Find latest day closeout to determine the active shift start boundary
+      const { data: latestCloseout } = await supabaseAdmin
+        .from('crm_day_closeouts')
+        .select('shift_end, created_at')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
 
-      const { data: todayOrders } = await supabaseAdmin
+      const isRecentCloseout = latestCloseout && (Date.now() - new Date(latestCloseout.created_at).getTime() < 36 * 3600 * 1000)
+      const shiftStartIso = isRecentCloseout
+        ? (latestCloseout.shift_end || latestCloseout.created_at)
+        : null
+
+      let query = supabaseAdmin
         .from('crm_orders')
-        .select('total_price')
-        .gte('order_date', todayStart.toISOString())
+        .select('total_price, is_settled')
 
-      if (todayOrders && todayOrders.length > 0) {
-        totalCashToday = todayOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
+      if (shiftStartIso) {
+        query = query.gt('order_date', shiftStartIso)
+      } else {
+        const israelMidnightIso = getIsraelMidnightIso()
+        query = query.gte('order_date', israelMidnightIso)
+      }
+
+      // Only count unsettled orders currently in couriers' hands
+      const { data: activeOrders } = await query.eq('is_settled', false)
+
+      if (activeOrders && activeOrders.length > 0) {
+        totalCashToday = activeOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
+      } else {
+        totalCashToday = totalBatchCash
       }
     } catch (e) {
-      console.warn('[TelegramWebhook] Could not aggregate today orders:', e)
+      console.warn('[TelegramWebhook] Could not aggregate active shift orders:', e)
     }
 
     // 5. Send Receipt Confirmation back to dispatcher on Telegram

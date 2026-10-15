@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase/client'
 import { TRANSLATIONS, Language } from '@/lib/crm/translations'
 import { parseSingleOrderMessage, ParsedDeliveryOrder } from '@/lib/crm/parser'
 import { isSuperAdminUser, isStaffUser } from '@/lib/auth/roles'
+import { getIsraelDateString } from '@/lib/crm/date-utils'
 import GhostCrmLogo, { GhostCrmLogoIcon } from '@/components/crm/GhostCrmLogo'
 import {
   GridIcon,
@@ -594,7 +595,7 @@ export default function GhostCrmDashboard() {
   // Real-time Storekeeper Cash Collection Alert
   const latestWarehouseSettlement = useMemo(() => {
     if (!recentSettlements || recentSettlements.length === 0) return null
-    const todayIsoDate = new Date().toISOString().split('T')[0]
+    const todayIsoDate = getIsraelDateString()
     return (
       recentSettlements.find(s => {
         if (dismissedSettlementIds.includes(s.id)) return false
@@ -629,7 +630,7 @@ export default function GhostCrmDashboard() {
     if (shiftStartTime) {
       return orders.filter(o => o.order_date > shiftStartTime)
     }
-    const todayStr = new Date().toISOString().split('T')[0]
+    const todayStr = getIsraelDateString()
     return orders.filter(o => {
       const d = o.order_date || ''
       return d.startsWith(todayStr) || (d && new Date(d).toDateString() === new Date().toDateString())
@@ -640,7 +641,7 @@ export default function GhostCrmDashboard() {
   const dayCloseoutPreview = useMemo(() => {
     const activeOrders = activeShiftOrders || []
     const STANDARD_FEE = 100
-    const BAT_YAM_FEE = 120
+    const BAT_YAM_FEE = 50
 
     const map = new Map<string, {
       courier_id: string
@@ -673,7 +674,10 @@ export default function GhostCrmDashboard() {
       entry.gross_collected += price
 
       if (cId !== 'unassigned') {
-        const isBatYam = (o.city || '').includes('בת ים') || (o.address || '').includes('בת ים')
+        const isBatYam =
+          (o.city || '').includes('בת ים') ||
+          (o.address || '').includes('בת ים') ||
+          (o.address || '').includes('יוספטל')
         entry.courier_fee += isBatYam ? BAT_YAM_FEE : STANDARD_FEE
       }
     }
@@ -703,7 +707,7 @@ export default function GhostCrmDashboard() {
   // Filtered Orders Calculation
   const filteredOrders = useMemo(() => {
     const query = searchQuery.toLowerCase().trim()
-    const todayStr = new Date().toISOString().split('T')[0]
+    const todayStr = getIsraelDateString()
 
     return orders.filter(order => {
       // Shift filter
@@ -1614,7 +1618,7 @@ export default function GhostCrmDashboard() {
                   -₪{dayCloseoutPreview.totalCourierPay.toLocaleString()}
                 </p>
                 <p className="text-[10px] text-amber-600/70 dark:text-amber-400/60 font-medium">
-                  {isRtl ? '₪100 רגיל / ₪120 בת ים' : '₪100 std / ₪120 Bat Yam'}
+                  {isRtl ? '₪100 רגיל / ₪50 בת ים' : '₪100 std / ₪50 Bat Yam'}
                 </p>
               </div>
 
@@ -2799,6 +2803,7 @@ export default function GhostCrmDashboard() {
             setSelectedOrderForDrawer={setSelectedOrderForDrawer}
             couriers={couriers}
             onAssignCourier={handleAssignCourier}
+            shiftStartTime={shiftStartTime}
           />
         )}
 
