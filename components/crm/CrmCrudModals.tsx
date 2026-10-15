@@ -13,7 +13,7 @@ import {
   XIcon
 } from '@/components/crm/CrmIcons'
 import { Product, Brand, Courier, Order } from '@/components/crm/CrmRouteViews'
-import { parseSingleOrderMessage, ParsedDeliveryOrder } from '@/lib/crm/parser'
+import { parseSingleOrderMessage, ParsedDeliveryOrder, getOrderPaymentInfo } from '@/lib/crm/parser'
 
 // ========================================================
 // 1. PRODUCT CREATE / EDIT MODAL
@@ -1030,6 +1030,7 @@ export function OrderDraftModal({
   const [manualPrice, setManualPrice] = useState('')
   const [manualMenuItems, setManualMenuItems] = useState('')
   const [manualActualItems, setManualActualItems] = useState('')
+  const [manualPaymentMethod, setManualPaymentMethod] = useState<'CASH' | 'BIT' | 'CREDIT' | 'PREPAID'>('CASH')
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1054,9 +1055,13 @@ export function OrderDraftModal({
       setManualPrice(order.total_price ? String(order.total_price) : '')
       setManualMenuItems(order.menu_items || '')
       setManualActualItems(order.actual_items || '')
+
+      const payInfo = getOrderPaymentInfo(order)
+      setManualPaymentMethod(payInfo.paymentMethod)
     } else {
       setRawText('')
       setSelectedCourierId('')
+      setManualPaymentMethod('CASH')
     }
     setError(null)
   }, [order, isOpen])
@@ -1098,7 +1103,8 @@ export function OrderDraftModal({
           city: manualCity.trim(),
           totalPrice: Number(manualPrice) || 0,
           menuItems: manualMenuItems.trim(),
-          actualItems: manualActualItems.trim()
+          actualItems: manualActualItems.trim(),
+          paymentMethod: manualPaymentMethod
         }
       }
 
@@ -1282,13 +1288,34 @@ export function OrderDraftModal({
                     </p>
                   </div>
 
-                  <div className="pt-1 flex items-center justify-between border-t border-slate-200/60 dark:border-slate-800">
-                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                      💰 {isRtl ? 'סכום לגבייה:' : 'Cash Collected:'}
-                    </span>
-                    <span className="text-base font-black font-mono text-slate-900 dark:text-white">
-                      ₪{(liveParsed?.totalPrice ?? Number(order.total_price)).toLocaleString()}
-                    </span>
+                  <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                        💰 {isRtl ? 'שווי הזמנה כולל:' : 'Total Value:'}
+                      </span>
+                      <span className="text-base font-black font-mono text-slate-900 dark:text-white">
+                        ₪{(liveParsed?.totalPrice ?? Number(order.total_price)).toLocaleString()}
+                      </span>
+                    </div>
+
+                    {liveParsed?.isPrepaid ? (
+                      <div className="flex items-center justify-between p-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-900/40 text-amber-800 dark:text-amber-300">
+                        <span className="text-[11px] font-bold flex items-center gap-1.5">
+                          <span>💳</span>
+                          <span>{isRtl ? `סטטוס: ${liveParsed.paymentLabel || 'שולם מראש'}` : `Status: Prepaid (${liveParsed.paymentMethod})`}</span>
+                        </span>
+                        <span className="text-xs font-black font-mono px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200">
+                          {isRtl ? '0₪ לגבייה משליח' : '₪0 cash to collect'}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                        <span>💵 {isRtl ? 'גביית מזומן משליח:' : 'Cash to collect:'}</span>
+                        <span className="font-bold font-mono text-slate-800 dark:text-slate-200">
+                          ₪{(liveParsed?.totalPrice ?? Number(order.total_price)).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1322,7 +1349,7 @@ export function OrderDraftModal({
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  {isRtl ? 'מחיר לגבייה (₪) *' : 'Total Price (₪) *'}
+                  {isRtl ? 'שווי הזמנה כולל (₪) *' : 'Total Price (₪) *'}
                 </label>
                 <input
                   type="number"
@@ -1333,6 +1360,22 @@ export function OrderDraftModal({
                   onChange={e => setManualPrice(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
                 />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  {isRtl ? 'אמצעי תשלום וגבייה מהשליח' : 'Payment Method & Courier Cash'}
+                </label>
+                <select
+                  value={manualPaymentMethod}
+                  onChange={e => setManualPaymentMethod(e.target.value as any)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 cursor-pointer"
+                >
+                  <option value="CASH">{isRtl ? '💵 מזומן — גבייה מלאה ע״י שליח' : '💵 Cash — Full collect by courier'}</option>
+                  <option value="BIT">{isRtl ? '📱 ביט — שולם מראש (0₪ לגבייה משליח)' : '📱 Bit — Prepaid (₪0 to collect)'}</option>
+                  <option value="CREDIT">{isRtl ? '💳 כרטיס אשראי — שולם מראש (0₪ לגבייה משליח)' : '💳 Credit Card — Prepaid (₪0 to collect)'}</option>
+                  <option value="PREPAID">{isRtl ? '✅ שולם מראש — (0₪ לגבייה משליח)' : '✅ Paid in Advance (₪0 to collect)'}</option>
+                </select>
               </div>
 
               <div className="sm:col-span-2">

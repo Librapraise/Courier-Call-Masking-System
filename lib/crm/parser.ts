@@ -9,13 +9,19 @@ export interface ParsedItemDeduction {
   matchedProductCategory?: string
 }
 
+export type PaymentMethod = 'CASH' | 'BIT' | 'CREDIT' | 'PREPAID'
+
 export interface ParsedDeliveryOrder {
   customerName: string       // Delivery address used as customer identity (e.g. "מרקו לויז - הנשיאים 57 פתח תקווה")
   city: string               // Extracted city (e.g. "פתח תקווה")
   phoneNumber: string        // Normalized Israeli phone (05XXXXXXXX)
   telegramHandle?: string    // @username
   customerType: string       // "קבוע", "חדש", "VIP"
-  totalPrice: number         // Cash price
+  totalPrice: number         // Total order value (₪)
+  paymentMethod: PaymentMethod // 'CASH' | 'BIT' | 'CREDIT' | 'PREPAID'
+  isPrepaid: boolean         // True if customer paid via Bit / Credit / Prepaid
+  cashToCollect: number      // Physical cash courier must collect (0 if prepaid)
+  paymentLabel?: string      // Human-readable payment label (e.g. "שולם בביט")
   brand: string              // Matched from the 37 brands
   menuItems: string          // Original menu description
   actualItems: string        // Summary of actual warehouse deductions
@@ -75,6 +81,181 @@ export function extractPrice(text: string): number {
   }
 
   return 0.0
+}
+
+/**
+ * Extracts payment method and prepaid status from text.
+ * Detects: ביט, אשראי, שולם מראש, שולם בביט, 0₪, לגבות 0, etc.
+ */
+export function extractPaymentDetails(text: string, totalPrice: number): {
+  paymentMethod: PaymentMethod
+  isPrepaid: boolean
+  cashToCollect: number
+  paymentLabel: string
+} {
+  const lower = (text || '').toLowerCase()
+
+  const hasBit =
+    lower.includes('ביט') ||
+    lower.includes('בביט') ||
+    lower.includes('שולם בביט') ||
+    lower.includes('שולם ביט') ||
+    /\bbit\b/i.test(lower)
+
+  const hasCredit =
+    lower.includes('אשראי') ||
+    lower.includes('באשראי') ||
+    lower.includes('שולם באשראי') ||
+    /\bcredit\b/i.test(lower)
+
+  const hasPrepaid =
+    hasBit ||
+    hasCredit ||
+    lower.includes('שולם מראש') ||
+    lower.includes('שולם') ||
+    lower.includes('prepaid') ||
+    lower.includes('paid in advance') ||
+    lower.includes('לגבות 0') ||
+    lower.includes('לגבות: 0') ||
+    lower.includes('0₪ לגבייה') ||
+    lower.includes('0 לגבייה') ||
+    lower.includes('0 לגביה') ||
+    /(?:^|\s)0\s*(?:₪|ש"ח|שח)/.test(lower)
+
+  if (hasBit) {
+    return {
+      paymentMethod: 'BIT',
+      isPrepaid: true,
+      cashToCollect: 0,
+      paymentLabel: 'שולם בביט'
+    }
+  }
+
+  if (hasCredit) {
+    return {
+      paymentMethod: 'CREDIT',
+      isPrepaid: true,
+      cashToCollect: 0,
+      paymentLabel: 'שולם באשראי'
+    }
+  }
+
+  if (hasPrepaid) {
+    return {
+      paymentMethod: 'PREPAID',
+      isPrepaid: true,
+      cashToCollect: 0,
+      paymentLabel: 'שולם מראש'
+    }
+  }
+
+  return {
+    paymentMethod: 'CASH',
+    isPrepaid: false,
+    cashToCollect: totalPrice,
+    paymentLabel: 'מזומן'
+  }
+}
+
+/**
+ * Universal helper to inspect any order object and determine payment method,
+ * prepaid status, and cash to collect by the courier.
+ */
+export function getOrderPaymentInfo(order: {
+  total_price?: number | string | null
+  raw_message?: string | null
+  notes?: string | null
+  menu_items?: string | null
+  payment_method?: string | null
+  is_prepaid?: boolean | null
+}): {
+  isPrepaid: boolean
+  paymentMethod: PaymentMethod
+  cashToCollect: number
+  totalPrice: number
+  labelHe: string
+  badgeText: string
+} {
+  const isPrepaidFlag =
+    order.is_prepaid === true ||
+    order.payment_method === 'BIT' ||
+    order.payment_method === 'CREDIT' ||
+    order.payment_method === 'PREPAID'
+
+  const combined = [
+    order.raw_message || '',
+    order.notes || '',
+    order.menu_items || '',
+    order.payment_method || ''
+  ].join(' ').toLowerCase()
+
+  const hasBit =
+    order.payment_method === 'BIT' ||
+    combined.includes('ביט') ||
+    combined.includes('בביט') ||
+    combined.includes('שולם בביט') ||
+    combined.includes('שולם ביט') ||
+    /\bbit\b/i.test(combined)
+
+  const hasCredit =
+    order.payment_method === 'CREDIT' ||
+    combined.includes('אשראי') ||
+    combined.includes('באשראי') ||
+    combined.includes('שולם באשראי') ||
+    /\bcredit\b/i.test(combined)
+
+  const hasPrepaid =
+    isPrepaidFlag ||
+    hasBit ||
+    hasCredit ||
+    order.payment_method === 'PREPAID' ||
+    combined.includes('שולם מראש') ||
+    combined.includes('שולם') ||
+    combined.includes('prepaid') ||
+    combined.includes('paid in advance') ||
+    combined.includes('לגבות 0') ||
+    combined.includes('לגבות: 0') ||
+    combined.includes('0₪ לגבייה') ||
+    combined.includes('0 לגבייה') ||
+    combined.includes('0 לגביה') ||
+    Number(order.total_price || 0) === 0
+
+  const method: PaymentMethod = hasBit
+    ? 'BIT'
+    : hasCredit
+    ? 'CREDIT'
+    : hasPrepaid
+    ? 'PREPAID'
+    : 'CASH'
+
+  const isPrepaid = hasPrepaid
+  const totalPrice = Number(order.total_price || 0)
+  const cashToCollect = isPrepaid ? 0 : totalPrice
+
+  const labelHe = hasBit
+    ? 'שולם בביט'
+    : hasCredit
+    ? 'שולם באשראי'
+    : isPrepaid
+    ? 'שולם מראש'
+    : 'מזומן'
+
+  const badgeText = hasBit
+    ? '📱 ביט'
+    : hasCredit
+    ? '💳 אשראי'
+    : isPrepaid
+    ? '💳 שולם מראש'
+    : '💵 מזומן'
+
+  return {
+    isPrepaid,
+    paymentMethod: method,
+    cashToCollect,
+    totalPrice,
+    labelHe,
+    badgeText
+  }
 }
 
 /**
@@ -240,6 +421,9 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
     ? deductions.map(d => `${d.quantity}${d.unit === 'g' ? 'g' : ' יח׳'} ${d.warehouseProductName}`).join(', ')
     : menuItemsSummary
 
+  // Determine payment method and cash to collect
+  const paymentDetails = extractPaymentDetails(cleanRaw, totalPrice)
+
   return {
     customerName,
     city: city || 'אחר',
@@ -247,6 +431,10 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
     telegramHandle,
     customerType,
     totalPrice,
+    paymentMethod: paymentDetails.paymentMethod,
+    isPrepaid: paymentDetails.isPrepaid,
+    cashToCollect: paymentDetails.cashToCollect,
+    paymentLabel: paymentDetails.paymentLabel,
     brand,
     menuItems: menuItemsSummary,
     actualItems: actualItemsSummary,

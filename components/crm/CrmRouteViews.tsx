@@ -23,7 +23,7 @@ import {
   TrashIcon,
   SettingsIcon
 } from '@/components/crm/CrmIcons'
-import { ParsedDeliveryOrder } from '@/lib/crm/parser'
+import { ParsedDeliveryOrder, getOrderPaymentInfo } from '@/lib/crm/parser'
 import { getIsraelDateString } from '@/lib/crm/date-utils'
 
 export interface Customer {
@@ -51,14 +51,19 @@ export interface Courier {
   telegram_id?: number | string | null
   is_active?: boolean
   todayCash?: number
+  todayBit?: number
   todayOrders?: number
   totalOrdersToday?: number
   totalCashToday?: number
+  totalBitToday?: number
+  totalGrossToday?: number
   settledOrdersToday?: number
   settledCashToday?: number
+  settledBitToday?: number
   settledNetCashToday?: number
   pendingOrdersToday?: number
   pendingCashToday?: number
+  pendingBitToday?: number
   isSettledToday?: boolean
   shiftStatus?: 'no_shift' | 'open' | 'reconciled'
   created_at?: string
@@ -75,6 +80,9 @@ export interface Order {
   order_date: string
   courier_id?: string | null
   raw_message?: string
+  payment_method?: string | null
+  is_prepaid?: boolean | null
+  notes?: string | null
   crm_customers?: Customer
   brands?: Brand
   crm_couriers?: Courier
@@ -92,6 +100,7 @@ export interface Product {
 
 export interface DashboardMetrics {
   courierCashToday: number
+  totalBitCreditToday?: number
   totalCashToday?: number
   reconciledCashToday?: number
   totalDeliveriesToday: number
@@ -910,7 +919,20 @@ export function OrdersRouteView({
                         </span>
                       </td>
                       <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white text-sm whitespace-nowrap">
-                        ₪{Number(order.total_price || 0).toLocaleString()}
+                        {(() => {
+                          const payInfo = getOrderPaymentInfo(order)
+                          return (
+                            <div className="flex flex-col gap-0.5">
+                              <span>₪{Number(order.total_price || 0).toLocaleString()}</span>
+                              {payInfo.isPrepaid ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60 w-fit">
+                                  <span>💳</span>
+                                  <span>{payInfo.paymentMethod === 'BIT' ? (isRtl ? 'ביט (גבייה: 0₪)' : 'Bit (Collect: ₪0)') : (isRtl ? 'שולם מראש (גבייה: 0₪)' : 'Prepaid (Collect: ₪0)')}</span>
+                                </span>
+                              ) : null}
+                            </div>
+                          )
+                        })()}
                       </td>
                       <td className="py-3.5 px-3 text-center" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1.5">
@@ -1416,6 +1438,12 @@ export function SettlementsRouteView({
                     <span className="font-mono text-emerald-600 dark:text-emerald-400">
                       {settledCount} dlvs (₪{Number(settledCash).toLocaleString()})
                     </span>
+                  </div>
+                ) : null}
+                {courier.todayBit && courier.todayBit > 0 ? (
+                  <div className="flex items-center justify-between text-[10px] text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50/60 dark:bg-indigo-950/30 px-2 py-0.5 rounded-md border border-indigo-100 dark:border-indigo-900/40">
+                    <span>📱 {isRtl ? 'שולם בביט / אשראי:' : 'Bit / Credit:'}</span>
+                    <span className="font-mono">₪{Number(courier.todayBit).toLocaleString()}</span>
                   </div>
                 ) : null}
               </div>

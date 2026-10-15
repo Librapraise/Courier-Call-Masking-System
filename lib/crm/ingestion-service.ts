@@ -147,26 +147,43 @@ export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise
       console.warn('[Ingest] Legacy customer sync note:', syncErr)
     }
 
-    // 3. Create Order record
-    const { data: newOrder, error: orderError } = await supabaseAdmin
+    // 3. Create Order record (with graceful fallback if payment_method column not yet added)
+    let newOrder: any = null
+    const basePayload = {
+      customer_id: customerId,
+      brand_id: brandId,
+      address: parsed.customerName,
+      city: parsed.city,
+      menu_items: parsed.menuItems,
+      actual_items: parsed.actualItems,
+      total_price: parsed.totalPrice,
+      is_settled: false,
+      raw_message: parsed.rawText,
+      order_date: new Date().toISOString()
+    }
+
+    const { data: orderWithPay, error: orderPayErr } = await supabaseAdmin
       .from('crm_orders')
       .insert({
-        customer_id: customerId,
-        brand_id: brandId,
-        address: parsed.customerName,
-        city: parsed.city,
-        menu_items: parsed.menuItems,
-        actual_items: parsed.actualItems,
-        total_price: parsed.totalPrice,
-        is_settled: false,
-        raw_message: parsed.rawText,
-        order_date: new Date().toISOString()
+        ...basePayload,
+        payment_method: parsed.paymentMethod,
+        is_prepaid: parsed.isPrepaid
       })
       .select('id')
       .single()
 
-    if (orderError || !newOrder) {
-      throw new Error(`Order creation error: ${orderError?.message}`)
+    if (orderPayErr) {
+      const { data: fallbackOrder, error: fallbackErr } = await supabaseAdmin
+        .from('crm_orders')
+        .insert(basePayload)
+        .select('id')
+        .single()
+      if (fallbackErr || !fallbackOrder) {
+        throw new Error(`Order creation error: ${fallbackErr?.message}`)
+      }
+      newOrder = fallbackOrder
+    } else {
+      newOrder = orderWithPay
     }
 
     const orderId = newOrder.id

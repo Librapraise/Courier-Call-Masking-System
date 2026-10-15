@@ -7,7 +7,7 @@ import { sendTelegramMessage } from '@/lib/crm/telegram-bot'
 import { formatPhoneForStorage } from '@/lib/utils/phone'
 import { isStaffUser } from '@/lib/auth/roles'
 import { getIsraelDateString, getIsraelMidnightIso } from '@/lib/crm/date-utils'
-import { parseDeliveryMessage } from '@/lib/crm/parser'
+import { parseDeliveryMessage, getOrderPaymentInfo } from '@/lib/crm/parser'
 
 function getLocalDayCloseouts(): any[] {
   try {
@@ -64,6 +64,7 @@ export async function GET() {
         total_price,
         is_settled,
         order_date,
+        raw_message,
         customer_id,
         brand_id,
         courier_id,
@@ -198,17 +199,22 @@ export async function GET() {
       : allOrders.filter(o => o.order_date >= defaultShiftStart)
     const totalDeliveriesToday = todayOrders.length
     
-    // Courier cash currently in the street/courier hands (UNSETTLED only)
+    // Courier physical cash currently in the street/courier hands (UNSETTLED only, excluding Bit/prepaid)
     const courierCashToday = todayOrders
-      .filter(o => !o.is_settled)
+      .filter(o => !o.is_settled && !getOrderPaymentInfo(o).isPrepaid)
       .reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
     
-    // Total cash across all deliveries today (both settled and pending)
+    // Total gross volume across all deliveries today (both settled and pending, cash + bit)
     const totalCashToday = todayOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
+
+    // Total amount in Bit / credit provider today (prepaid)
+    const totalBitCreditToday = todayOrders
+      .filter(o => getOrderPaymentInfo(o).isPrepaid)
+      .reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
     
-    // Reconciled cash already handed over to the warehouse today
+    // Reconciled physical cash already handed over to the warehouse today
     const reconciledCashToday = todayOrders
-      .filter(o => o.is_settled)
+      .filter(o => o.is_settled && !getOrderPaymentInfo(o).isPrepaid)
       .reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
 
     // Active customers count and directory
@@ -263,12 +269,17 @@ export async function GET() {
     })
 
     // Compute courier totals separating unsettled (pending closeout) from already-settled
+    // and separating physical cash to collect from Bit/credit prepaid funds
     const courierSummaryMap: Record<string, {
       totalCashToday: number
+      totalBitToday: number
+      totalGrossToday: number
       totalOrdersToday: number
       settledCashToday: number
+      settledBitToday: number
       settledOrdersToday: number
       pendingCashToday: number
+      pendingBitToday: number
       pendingOrdersToday: number
     }> = {}
 
@@ -277,23 +288,35 @@ export async function GET() {
       if (!courierSummaryMap[cId]) {
         courierSummaryMap[cId] = {
           totalCashToday: 0,
+          totalBitToday: 0,
+          totalGrossToday: 0,
           totalOrdersToday: 0,
           settledCashToday: 0,
+          settledBitToday: 0,
           settledOrdersToday: 0,
           pendingCashToday: 0,
+          pendingBitToday: 0,
           pendingOrdersToday: 0
         }
       }
       const price = Number(o.total_price) || 0
+      const payInfo = getOrderPaymentInfo(o)
+      const physicalCash = payInfo.isPrepaid ? 0 : price
+      const bitAmount = payInfo.isPrepaid ? price : 0
+
       courierSummaryMap[cId].totalOrdersToday += 1
-      courierSummaryMap[cId].totalCashToday += price
+      courierSummaryMap[cId].totalGrossToday += price
+      courierSummaryMap[cId].totalCashToday += physicalCash
+      courierSummaryMap[cId].totalBitToday += bitAmount
 
       if (o.is_settled) {
         courierSummaryMap[cId].settledOrdersToday += 1
-        courierSummaryMap[cId].settledCashToday += price
+        courierSummaryMap[cId].settledCashToday += physicalCash
+        courierSummaryMap[cId].settledBitToday += bitAmount
       } else {
         courierSummaryMap[cId].pendingOrdersToday += 1
-        courierSummaryMap[cId].pendingCashToday += price
+        courierSummaryMap[cId].pendingCashToday += physicalCash
+        courierSummaryMap[cId].pendingBitToday += bitAmount
       }
     })
 
@@ -316,10 +339,14 @@ export async function GET() {
     const couriers = (couriersData || []).map(c => {
       const s = courierSummaryMap[c.id] || {
         totalCashToday: 0,
+        totalBitToday: 0,
+        totalGrossToday: 0,
         totalOrdersToday: 0,
         settledCashToday: 0,
+        settledBitToday: 0,
         settledOrdersToday: 0,
         pendingCashToday: 0,
+        pendingBitToday: 0,
         pendingOrdersToday: 0
       }
       const hasOrdersToday = s.totalOrdersToday > 0
@@ -330,14 +357,19 @@ export async function GET() {
         ...c,
         // todayCash & todayOrders represent the active pending batch waiting for closeout!
         todayCash: s.pendingCashToday,
+        todayBit: s.pendingBitToday,
         todayOrders: s.pendingOrdersToday,
         totalOrdersToday: s.totalOrdersToday,
         totalCashToday: s.totalCashToday,
+        totalBitToday: s.totalBitToday,
+        totalGrossToday: s.totalGrossToday,
         settledOrdersToday: s.settledOrdersToday,
         settledCashToday: s.settledCashToday,
+        settledBitToday: s.settledBitToday,
         settledNetCashToday: courierSettledNetMap[c.id] || 0,
         pendingOrdersToday: s.pendingOrdersToday,
         pendingCashToday: s.pendingCashToday,
+        pendingBitToday: s.pendingBitToday,
         isSettledToday,
         shiftStatus: !hasOrdersToday ? 'no_shift' : hasPending ? 'open' : 'reconciled'
       }
@@ -353,6 +385,7 @@ export async function GET() {
     return NextResponse.json({
       metrics: {
         courierCashToday,
+        totalBitCreditToday,
         totalCashToday,
         reconciledCashToday,
         totalDeliveriesToday,
@@ -554,11 +587,21 @@ export async function POST(req: Request) {
         const botToken = process.env.TELEGRAM_BOT_TOKEN
         if (botToken) {
           try {
+            const payInfo = getOrderPaymentInfo(updatedOrder)
+            const priceDisplay = payInfo.isPrepaid
+              ? 'שולם מראש (0₪ מזומן) 💳'
+              : `₪${Number(updatedOrder.total_price || 0).toLocaleString()} מזומן`
+
+            const prepaidWarning = payInfo.isPrepaid
+              ? `\n💳 *סטטוס תשלום:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
+              : ''
+
             const dispatchAlert = `🛵 *הזמנה חדשה שובצה עבורך!*
 ━━━━━━━━━━━━━━━━━━━━━
 📍 *כתובת:* ${updatedOrder.address}
 🏙️ *עיר:* ${updatedOrder.city || 'מרכז'}
-💵 *סכום לגבייה:* ₪${Number(updatedOrder.total_price || 0).toLocaleString()} מזומן`
+💵 *סכום לגבייה:* ${priceDisplay}${prepaidWarning}
+📦 *פריטים:* ${updatedOrder.menu_items || updatedOrder.actual_items || '—'}`
 
             await sendTelegramMessage(botToken, {
               chat_id: assignedCourier.telegram_id,
@@ -698,6 +741,18 @@ export async function POST(req: Request) {
         }
       }
 
+      let batchBitTotal = 0
+      let batchPhysicalCash = 0
+      for (const o of orders) {
+        const payInfo = getOrderPaymentInfo(o)
+        const p = Number(o.total_price) || 0
+        if (payInfo.isPrepaid) {
+          batchBitTotal += p
+        } else {
+          batchPhysicalCash += p
+        }
+      }
+
       const deliveryFees = typeof reqDeliveryFees === 'number' && reqDeliveryFees >= 0
         ? reqDeliveryFees
         : (batYamCount * BAT_YAM_FEE + standardCount * STANDARD_FEE)
@@ -715,10 +770,11 @@ export async function POST(req: Request) {
 
       // Record the full financial breakdown in cash_settlements
       const batYamBreakdown = batYamCount > 0 ? ` (${standardCount} רגיל ₪${standardCount * STANDARD_FEE} + ${batYamCount} בת ים ₪${batYamCount * BAT_YAM_FEE})` : ''
+      const bitNoteStr = batchBitTotal > 0 ? ` [ביט/אשראי: ₪${batchBitTotal.toLocaleString()}]` : ''
       const settlementNotes = notes || (
         isAdditionalRun
-          ? `סגירת קופה (סבב נוסף) — ${orders.length} משלוחים${batYamBreakdown} בסבב זה | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse} (נסגרו מוקדם יותר: ${earlierCount} משלוחים / נטו ₪${displayEarlierNet.toLocaleString()})`
-          : `סגירת קופה — ${orders.length} משלוחים${batYamBreakdown} | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse}`
+          ? `סגירת קופה (סבב נוסף) — ${orders.length} משלוחים${batYamBreakdown}${bitNoteStr} בסבב זה | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse} (נסגרו מוקדם יותר: ${earlierCount} משלוחים / נטו ₪${displayEarlierNet.toLocaleString()})`
+          : `סגירת קופה — ${orders.length} משלוחים${batYamBreakdown}${bitNoteStr} | נגבה: ₪${grossCollected} | עמלת שליח: ₪${courierPay} (בונוס: ₪${bonus}) | נטו למחסנאי: ₪${netToWarehouse}`
       )
 
       const { error: insertV2Error } = await supabaseAdmin
@@ -827,10 +883,11 @@ export async function POST(req: Request) {
         (standardCount > 0 ? `  • ${standardCount} משלוחים רגילים × ₪${STANDARD_FEE} = ₪${standardCount * STANDARD_FEE}\n` : '') +
         (batYamCount   > 0 ? `  • ${batYamCount} משלוחי בת ים × ₪${BAT_YAM_FEE} = ₪${batYamCount * BAT_YAM_FEE}\n` : '') +
         (bonus         > 0 ? `  • 🎁 בונוס: ₪${bonus}\n` : '') +
-        `\n💰 *גבית מלקוחות בסבב זה:* ₪${grossCollected.toLocaleString()}\n` +
+        `\n💰 *גבית מלקוחות במזומן:* ₪${grossCollected.toLocaleString()}\n` +
+        (batchBitTotal > 0 ? `💳 *שולם מראש (ביט/אשראי):* ₪${batchBitTotal.toLocaleString()} _(לא נגבה במזומן)_\n` : '') +
         `📊 *עמלתך בסבב זה:* ₪${courierPay.toLocaleString()}\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `💳 *עליך להעביר למחסנאי: ₪${netToWarehouse.toLocaleString()}*`
+        `💳 *עליך להעביר למחסנאי במזומן: ₪${netToWarehouse.toLocaleString()}*`
 
       if (courierTgId && botToken) {
         await sendTelegramMessage(botToken, {
@@ -846,7 +903,8 @@ export async function POST(req: Request) {
         `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         `🛵 *שליח:* *${courierName}*\n` +
         `📦 *משלוחים שחולקו בסבב זה:* ${orders.length}\n` +
-        `💰 *סך שנגבה מלקוחות בסבב זה:* ₪${grossCollected.toLocaleString()}\n` +
+        `💰 *סך שנגבה מלקוחות במזומן:* ₪${grossCollected.toLocaleString()}\n` +
+        (batchBitTotal > 0 ? `💳 *מתוכם שולם בביט / אשראי:* ₪${batchBitTotal.toLocaleString()} _(אצל ספק האשראי, לא אצל השליח)_\n` : '') +
         `📊 *עמלת השליח שנוכתה:* ₪${courierPay.toLocaleString()}` + (bonus > 0 ? ` (כולל בונוס ₪${bonus})` : '') + `\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         `💵 *עליך לגבות כעת מ${courierName}: ₪${netToWarehouse.toLocaleString()} במזומן!*` +
@@ -952,6 +1010,8 @@ export async function POST(req: Request) {
         courier_telegram_id?: number | string | null
         orders_count: number
         gross_collected: number
+        cash_collected: number
+        bit_collected: number
         standard_count: number
         bat_yam_count: number
         courier_fee: number
@@ -972,6 +1032,8 @@ export async function POST(req: Request) {
             courier_telegram_id: c?.telegram_id,
             orders_count: 0,
             gross_collected: 0,
+            cash_collected: 0,
+            bit_collected: 0,
             standard_count: 0,
             bat_yam_count: 0,
             courier_fee: 0,
@@ -983,7 +1045,14 @@ export async function POST(req: Request) {
         const entry = courierMap.get(cId)!
         entry.orders_count += 1
         const price = Number(o.total_price) || 0
+        const payInfo = getOrderPaymentInfo(o)
+        const isPrepaidBit = payInfo.isPrepaid
+        const physicalCash = isPrepaidBit ? 0 : price
+        const bitAmount = isPrepaidBit ? price : 0
+
         entry.gross_collected += price
+        entry.cash_collected += physicalCash
+        entry.bit_collected += bitAmount
 
         if (cId !== 'unassigned') {
           const combined = [
@@ -1034,6 +1103,8 @@ export async function POST(req: Request) {
       }
 
       let totalGross = 0
+      let totalPhysicalCash = 0
+      let totalBitCredit = 0
       let totalCourierPay = 0
       let totalBonus = 0
       const courierBreakdown: any[] = []
@@ -1042,14 +1113,19 @@ export async function POST(req: Request) {
         const bonus = courierBonusMap.get(entry.courier_id) || 0
         entry.bonus = bonus
         entry.courier_fee += bonus
-        entry.net_to_safe = Math.max(0, entry.gross_collected - entry.courier_fee)
+        // The courier only deposits physical cash in the safe! Bit was collected directly by provider.
+        entry.net_to_safe = Math.max(0, entry.cash_collected - entry.courier_fee)
         totalGross += entry.gross_collected
+        totalPhysicalCash += entry.cash_collected
+        totalBitCredit += entry.bit_collected
         totalCourierPay += entry.courier_fee
         totalBonus += bonus
         courierBreakdown.push(entry)
       })
 
-      const totalNetToSafe = Math.max(0, totalGross - totalCourierPay)
+      const totalNetToSafe = Math.max(0, totalPhysicalCash - totalCourierPay)
+      const creditProviderBalance = totalBitCredit
+      const totalOverallBusinessProfit = totalNetToSafe + creditProviderBalance
 
       // 4. Mark all orders in this shift as settled
       if (isCloseoutRecent) {
@@ -1079,7 +1155,7 @@ export async function POST(req: Request) {
               net_expected: cEntry.net_to_safe,
               amount_received: cEntry.net_to_safe,
               status: 'SETTLED',
-              notes: `סגירת יום רשמית (${cEntry.orders_count} משלוחים | עמלה: ₪${cEntry.courier_fee}${cEntry.bonus > 0 ? ` [כולל ₪${cEntry.bonus} בונוס]` : ''} | נטו לכספת: ₪${cEntry.net_to_safe})`
+              notes: `סגירת יום רשמית (${cEntry.orders_count} משלוחים | עמלה: ₪${cEntry.courier_fee}${cEntry.bonus > 0 ? ` [כולל ₪${cEntry.bonus} בונוס]` : ''}${cEntry.bit_collected > 0 ? ` [ביט: ₪${cEntry.bit_collected}]` : ''} | נטו לכספת: ₪${cEntry.net_to_safe})`
             })
           } catch (e) {}
         }
@@ -1093,9 +1169,13 @@ export async function POST(req: Request) {
         shift_end: shiftEnd,
         total_orders: totalOrders,
         gross_collected: totalGross,
+        total_physical_cash: totalPhysicalCash,
+        total_bit_credit: totalBitCredit,
+        credit_provider_balance: creditProviderBalance,
         total_courier_pay: totalCourierPay,
         total_bonus: totalBonus,
         net_to_safe: totalNetToSafe,
+        total_net_profit: totalOverallBusinessProfit,
         courier_breakdown: courierBreakdown,
         notes: notes || 'סגירת יום מוצלחת',
         closed_by: user.id,
@@ -1107,7 +1187,29 @@ export async function POST(req: Request) {
         await supabaseAdmin
           .from('crm_day_closeouts')
           .insert(closeoutRecord)
-      } catch (e) {}
+      } catch (e) {
+        // Fallback if DB table has base schema without extra columns
+        try {
+          await supabaseAdmin
+            .from('crm_day_closeouts')
+            .insert({
+              id: closeoutRecord.id,
+              closeout_date: closeoutRecord.closeout_date,
+              shift_start: closeoutRecord.shift_start,
+              shift_end: closeoutRecord.shift_end,
+              total_orders: closeoutRecord.total_orders,
+              gross_collected: closeoutRecord.gross_collected,
+              total_courier_pay: closeoutRecord.total_courier_pay,
+              total_bonus: closeoutRecord.total_bonus,
+              net_to_safe: closeoutRecord.net_to_safe,
+              courier_breakdown: closeoutRecord.courier_breakdown,
+              notes: closeoutRecord.notes,
+              closed_by: closeoutRecord.closed_by,
+              closed_by_name: closeoutRecord.closed_by_name,
+              created_at: closeoutRecord.created_at
+            })
+        } catch (subErr) {}
+      }
 
       // Save to local fallback file for guaranteed persistence
       saveLocalDayCloseout(closeoutRecord)
@@ -1133,9 +1235,12 @@ export async function POST(req: Request) {
           const batYamStr = c.bat_yam_count > 0 ? `(כולל ${c.bat_yam_count} בת ים × ₪50)` : ''
           const bonusStr = c.bonus > 0 ? `(כולל ₪${c.bonus.toLocaleString()} בונוס)` : ''
           const detailsStr = [batYamStr, bonusStr].filter(Boolean).join(' ')
+          const bitNote = c.bit_collected > 0 ? `  ▫️ שולם בביט: ₪${c.bit_collected.toLocaleString()} (בסליקה)\n` : ''
           return (
             `🛵 *${c.courier_name}* • ${c.orders_count} משלוחים${detailsStr ? ` ${detailsStr}` : ''}\n` +
             `  ▫️ גבייה ברוטו: ₪${c.gross_collected.toLocaleString()}\n` +
+            bitNote +
+            `  ▫️ מזומן פיזי שנגבה: ₪${c.cash_collected.toLocaleString()}\n` +
             `  ▫️ עמלת שליח: ₪${c.courier_fee.toLocaleString()}\n` +
             `  📥 *מעטפה לגבייה לכספת: ₪${c.net_to_safe.toLocaleString()}*`
           )
@@ -1147,11 +1252,13 @@ export async function POST(req: Request) {
         .map(c => {
           const batYamStr = c.bat_yam_count > 0 ? ` (כולל ${c.bat_yam_count} בת ים × ₪50)` : ''
           const bonusStr = c.bonus > 0 ? ` (כולל ₪${c.bonus.toLocaleString()} בונוס)` : ''
+          const bitNote = c.bit_collected > 0 ? `  ▫️ מתוכם בביט/סליקה: ₪${c.bit_collected.toLocaleString()}\n` : ''
           return (
             `🛵 *${c.courier_name}* • ${c.orders_count} משלוחים\n` +
-            `  ▫️ גבייה ברוטו: ₪${c.gross_collected.toLocaleString()}\n` +
+            `  ▫️ מחזור ברוטו: ₪${c.gross_collected.toLocaleString()}\n` +
+            bitNote +
             `  ▫️ עמלת שליח: ₪${c.courier_fee.toLocaleString()}${batYamStr}${bonusStr}\n` +
-            `  💵 *נטו לעסק: ₪${c.net_to_safe.toLocaleString()}*`
+            `  💵 *נטו מזומן לכספת: ₪${c.net_to_safe.toLocaleString()}*`
           )
         })
         .join('\n\n') || 'ללא פעילות שליחים'
@@ -1163,11 +1270,19 @@ export async function POST(req: Request) {
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
         `📦 *סיכום סבב משלוחים:*\n` +
         `▫️ סה״כ משלוחים שסופקו: *${totalOrders}*\n` +
-        `▫️ סך גבייה מלקוחות: *₪${totalGross.toLocaleString()}*\n` +
+        `▫️ מחזור מכירות כללי: *₪${totalGross.toLocaleString()}*\n` +
+        `  ▫️ גביית מזומן פיזי משליחים: *₪${totalPhysicalCash.toLocaleString()}*\n` +
+        `  ▫️ שולם מראש בביט / אשראי: *₪${totalBitCredit.toLocaleString()}*\n` +
         `▫️ סך עמלות שליחים ששולמו: *₪${totalCourierPay.toLocaleString()}*\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
         `💵 *סך נטו מזומן להפקדה בכספת:*\n` +
         `💰 *₪${totalNetToSafe.toLocaleString()}*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📱 *יתרה אצל ספק אשראי / ביט (טרם נמשך):*\n` +
+        `💳 *₪${totalBitCredit.toLocaleString()}*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🏦 *סה״כ רווח נקי כולל לעסק (כספת + ביט):*\n` +
+        `💎 *₪${totalOverallBusinessProfit.toLocaleString()}*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
         `📋 *פירוט מעטפות מזומן לגבייה מכל שליח:*\n\n` +
         `${courierWarehouseCards}\n\n` +
@@ -1182,11 +1297,19 @@ export async function POST(req: Request) {
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
         `📈 *סיכום פיננסי יומי:*\n` +
         `▫️ סה״כ הזמנות שנמסרו: *${totalOrders}*\n` +
-        `▫️ מחזור גבייה ברוטו (מזומן): *₪${totalGross.toLocaleString()}*\n` +
+        `▫️ מחזור מכירות כולל: *₪${totalGross.toLocaleString()}*\n` +
+        `  ▫️ תקבולים במזומן (שליחים): *₪${totalPhysicalCash.toLocaleString()}*\n` +
+        `  ▫️ תקבולים בסליקה / ביט: *₪${totalBitCredit.toLocaleString()}*\n` +
         `▫️ הוצאות עמלות שליחים: *₪${totalCourierPay.toLocaleString()}*\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `💵 *רווח נטו במזומן שהופקד לעסק:*\n` +
+        `💵 *רווח נטו במזומן שהופקד לכספת:*\n` +
         `💰 *₪${totalNetToSafe.toLocaleString()}*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📱 *יתרה לגבייה מספק אשראי / ביט:*\n` +
+        `💳 *₪${totalBitCredit.toLocaleString()}*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🏦 *סה״כ רווח נקי כולל לעסק (מזומן + אשראי):*\n` +
+        `💎 *₪${totalOverallBusinessProfit.toLocaleString()}*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
         `👥 *פירוט הכנסות ועמלות לפי שליח:*\n\n` +
         `${courierAccountantCards}\n\n` +
@@ -1833,6 +1956,14 @@ export async function POST(req: Request) {
               }
             }
 
+            const payInfo = getOrderPaymentInfo(updatedOrder)
+            const priceDisplay = payInfo.isPrepaid
+              ? 'שולם מראש (0₪ מזומן) 💳'
+              : `₪${Number(updatedOrder.total_price || 0).toLocaleString()} מזומן`
+            const prepaidWarning = payInfo.isPrepaid
+              ? `\n💳 *סטטוס תשלום:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
+              : ''
+
             // Notify new courier of new dispatch
             if (courierObj?.telegram_id) {
               await sendTelegramMessage(botToken, {
@@ -1842,7 +1973,7 @@ export async function POST(req: Request) {
 ━━━━━━━━━━━━━━━━━━━━━
 📍 *כתובת:* ${updatedOrder.address}
 🏙️ *עיר:* ${updatedOrder.city || 'מרכז'}
-💵 *סכום לגבייה:* ₪${Number(updatedOrder.total_price || 0).toLocaleString()} מזומן
+💵 *סכום לגבייה:* ${priceDisplay}${prepaidWarning}
 📦 *פריטים:* ${updatedOrder.menu_items || updatedOrder.actual_items || '—'}`
               })
             }
@@ -1855,16 +1986,23 @@ export async function POST(req: Request) {
             if (priceChanged || addressChanged || itemsChanged) {
               const oldPriceNum = Number(currentOrder.total_price || 0)
               const newPriceNum = Number(updatedOrder.total_price || 0)
+              const payInfo = getOrderPaymentInfo(updatedOrder)
+              const priceDisplay = payInfo.isPrepaid
+                ? 'שולם מראש (0₪ מזומן) 💳'
+                : `₪${newPriceNum.toLocaleString()} מזומן`
+              const prepaidWarning = payInfo.isPrepaid
+                ? `\n💳 *הנחיה לשליח:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
+                : ''
 
               const updateAlert = `⚠️ *עדכון הזמנה / שינוי סכום לגבייה!*
 ━━━━━━━━━━━━━━━━━━━━━
 📍 *כתובת:* ${updatedOrder.address}${addressChanged ? ` _(עודכן מ-${currentOrder.address})_` : ''}
 🏙️ *עיר:* ${updatedOrder.city || 'מרכז'}
-💵 *סכום מעודכן לגבייה:* ₪${newPriceNum.toLocaleString()} מזומן${
-                priceChanged
+💵 *סכום מעודכן לגבייה:* ${priceDisplay}${
+                priceChanged && !payInfo.isPrepaid
                   ? ` _(עודכן מ-₪${oldPriceNum.toLocaleString()})_`
                   : ''
-              }
+              }${prepaidWarning}
 ${itemsChanged ? `📦 *פריטים מעודכנים:* ${updatedOrder.menu_items || updatedOrder.actual_items || '—'}\n` : ''}
 🕒 *שעת עדכון:* ${new Date().toLocaleTimeString('he-IL', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' })}`
 

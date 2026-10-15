@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase/client'
 import { TRANSLATIONS, Language } from '@/lib/crm/translations'
-import { parseSingleOrderMessage, ParsedDeliveryOrder } from '@/lib/crm/parser'
+import { parseSingleOrderMessage, ParsedDeliveryOrder, getOrderPaymentInfo } from '@/lib/crm/parser'
 import { isSuperAdminUser, isStaffUser } from '@/lib/auth/roles'
 import { getIsraelDateString } from '@/lib/crm/date-utils'
 import GhostCrmLogo, { GhostCrmLogoIcon } from '@/components/crm/GhostCrmLogo'
@@ -90,14 +90,19 @@ interface Courier {
   telegram_id?: number | string | null
   is_active?: boolean
   todayCash?: number
+  todayBit?: number
   todayOrders?: number
   totalOrdersToday?: number
   totalCashToday?: number
+  totalBitToday?: number
+  totalGrossToday?: number
   settledOrdersToday?: number
   settledCashToday?: number
+  settledBitToday?: number
   settledNetCashToday?: number
   pendingOrdersToday?: number
   pendingCashToday?: number
+  pendingBitToday?: number
   isSettledToday?: boolean
   shiftStatus?: 'no_shift' | 'open' | 'reconciled'
   created_at?: string
@@ -114,6 +119,9 @@ interface Order {
   order_date: string
   courier_id?: string | null
   raw_message?: string
+  payment_method?: string | null
+  is_prepaid?: boolean | null
+  notes?: string | null
   crm_customers?: Customer
   brands?: Brand
   crm_couriers?: Courier
@@ -131,6 +139,7 @@ interface Product {
 
 interface DashboardMetrics {
   courierCashToday: number
+  totalBitCreditToday?: number
   totalCashToday?: number
   reconciledCashToday?: number
   totalDeliveriesToday: number
@@ -703,6 +712,8 @@ export default function GhostCrmDashboard() {
       courier_name: string
       orders_count: number
       gross_collected: number
+      cash_collected: number
+      bit_collected: number
       courier_fee: number
       net_to_safe: number
     }>()
@@ -718,6 +729,8 @@ export default function GhostCrmDashboard() {
           courier_name: cName,
           orders_count: 0,
           gross_collected: 0,
+          cash_collected: 0,
+          bit_collected: 0,
           courier_fee: 0,
           net_to_safe: 0
         })
@@ -726,7 +739,13 @@ export default function GhostCrmDashboard() {
       const entry = map.get(cId)!
       entry.orders_count += 1
       const price = Number(o.total_price) || 0
+      const payInfo = getOrderPaymentInfo(o)
+      const physicalCash = payInfo.isPrepaid ? 0 : price
+      const bitAmount = payInfo.isPrepaid ? price : 0
+
       entry.gross_collected += price
+      entry.cash_collected += physicalCash
+      entry.bit_collected += bitAmount
 
       if (cId !== 'unassigned') {
         const isBatYam = isBatYamOrder(o)
@@ -747,25 +766,36 @@ export default function GhostCrmDashboard() {
     }
 
     let totalGross = 0
+    let totalPhysicalCash = 0
+    let totalBitCredit = 0
     let totalCourierPay = 0
     const couriersList: any[] = []
 
     map.forEach((entry) => {
       const bonus = courierBonusMap.get(entry.courier_id) || 0
       entry.courier_fee += bonus
-      entry.net_to_safe = Math.max(0, entry.gross_collected - entry.courier_fee)
+      // Courier only deposits physical cash in the safe
+      entry.net_to_safe = Math.max(0, entry.cash_collected - entry.courier_fee)
       totalGross += entry.gross_collected
+      totalPhysicalCash += entry.cash_collected
+      totalBitCredit += entry.bit_collected
       totalCourierPay += entry.courier_fee
       couriersList.push(entry)
     })
 
-    const netToSafe = Math.max(0, totalGross - totalCourierPay)
+    const netToSafe = Math.max(0, totalPhysicalCash - totalCourierPay)
+    const creditProviderBalance = totalBitCredit
+    const totalBusinessNet = netToSafe + creditProviderBalance
 
     return {
       totalOrders: activeOrders.length,
       totalGross,
+      totalPhysicalCash,
+      totalBitCredit,
       totalCourierPay,
       netToSafe,
+      creditProviderBalance,
+      totalBusinessNet,
       couriersList
     }
   }, [activeShiftOrders, recentSettlements, shiftStartTime, isRtl])
@@ -1528,6 +1558,26 @@ export default function GhostCrmDashboard() {
                   </div>
                 </div>
 
+                {/* Prepaid Bit / Credit Notice */}
+                {settlingCourier.todayBit && settlingCourier.todayBit > 0 ? (
+                  <div className="p-3 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800 text-xs text-indigo-950 dark:text-indigo-200 flex flex-col gap-1">
+                    <div className="flex items-center justify-between font-bold">
+                      <span className="flex items-center gap-1.5">
+                        <span>📱</span>
+                        <span>{isRtl ? 'שולם מראש בביט / אשראי:' : 'Prepaid via Bit / Credit:'}</span>
+                      </span>
+                      <span className="font-mono font-black text-sm text-indigo-600 dark:text-indigo-400">
+                        ₪{Number(settlingCourier.todayBit).toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-indigo-700 dark:text-indigo-300">
+                      {isRtl
+                        ? 'סכום זה שולם ישירות בביט / אשראי — השליח אינו מחזיק במזומן זה ואינו נדרש להעבירו למחסנאי.'
+                        : 'This amount was paid in advance — the courier did not collect cash and is not required to deposit it.'}
+                    </p>
+                  </div>
+                ) : null}
+
                 {/* Row 2 — Gross cash collected */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -1739,43 +1789,76 @@ export default function GhostCrmDashboard() {
               </button>
             </div>
 
-            {/* Financial Overview Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/70 dark:border-slate-800 space-y-1">
-                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  {t.totalGrossDay || 'סך גבייה ברוטו'}
+            {/* Financial Overview Cards — 4-Card Responsive Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/70 dark:border-slate-800 space-y-1">
+                <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate block">
+                  {t.totalGrossDay || 'מחזור כללי'}
                 </span>
-                <p className="text-xl font-black font-mono text-slate-900 dark:text-white">
+                <p className="text-lg sm:text-xl font-black font-mono text-slate-900 dark:text-white">
                   ₪{dayCloseoutPreview.totalGross.toLocaleString()}
                 </p>
-                <p className="text-[10px] text-slate-400 font-medium">
+                <p className="text-[10px] text-slate-400 font-medium truncate">
                   {dayCloseoutPreview.totalOrders} {isRtl ? 'משלוחים שסופקו' : 'orders delivered'}
                 </p>
               </div>
 
-              <div className="p-4 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 space-y-1">
-                <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+              <div className="p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/20 border border-indigo-200/70 dark:border-indigo-900/40 space-y-1">
+                <span className="text-[10px] sm:text-[11px] font-bold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider truncate block flex items-center gap-1">
+                  <span>📱</span>
+                  <span>{isRtl ? 'שולם בביט / אשראי' : 'Bit / Credit'}</span>
+                </span>
+                <p className="text-lg sm:text-xl font-black font-mono text-indigo-600 dark:text-indigo-400">
+                  ₪{dayCloseoutPreview.totalBitCredit.toLocaleString()}
+                </p>
+                <p className="text-[10px] text-indigo-600/80 dark:text-indigo-400/70 font-medium truncate">
+                  {isRtl ? 'יתרה אצל ספק אשראי' : 'Credit provider balance'}
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 space-y-1">
+                <span className="text-[10px] sm:text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider truncate block">
                   {t.totalCourierFeesDay || 'עמלות שליחים'}
                 </span>
-                <p className="text-xl font-black font-mono text-amber-600 dark:text-amber-400">
+                <p className="text-lg sm:text-xl font-black font-mono text-amber-600 dark:text-amber-400">
                   -₪{dayCloseoutPreview.totalCourierPay.toLocaleString()}
                 </p>
-                <p className="text-[10px] text-amber-600/70 dark:text-amber-400/60 font-medium">
+                <p className="text-[10px] text-amber-600/70 dark:text-amber-400/60 font-medium truncate">
                   {isRtl ? '₪100 רגיל / ₪50 בת ים' : '₪100 std / ₪50 Bat Yam'}
                 </p>
               </div>
 
-              <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1 shadow-xs">
-                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">
-                  {t.netToBusinessDay || 'נטו נשאר בכספת / בעסק'}
+              <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1 shadow-xs">
+                <span className="text-[10px] sm:text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider truncate block">
+                  {t.netToBusinessDay || 'נטו מזומן לכספת'}
                 </span>
-                <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+                <p className="text-xl sm:text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
                   ₪{dayCloseoutPreview.netToSafe.toLocaleString()}
                 </p>
-                <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/70 font-medium">
+                <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/70 font-medium truncate">
                   {isRtl ? 'מזומן פיזי להפקדה' : 'Physical cash to vault'}
                 </p>
               </div>
+            </div>
+
+            {/* Total Business Net Profit Summary Banner */}
+            <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-500/10 via-indigo-500/10 to-transparent border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🏦</span>
+                <div>
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    {isRtl ? 'סה״כ רווח נקי כולל לעסק (כספת + ספק אשראי)' : 'Total Business Net Profit (Vault + Credit Provider)'}
+                  </span>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                    {isRtl
+                      ? `₪${dayCloseoutPreview.netToSafe.toLocaleString()} מזומן בכספת + ₪${dayCloseoutPreview.totalBitCredit.toLocaleString()} שמורים אצל ספק האשראי`
+                      : `₪${dayCloseoutPreview.netToSafe.toLocaleString()} in safe + ₪${dayCloseoutPreview.totalBitCredit.toLocaleString()} held with credit provider`}
+                  </p>
+                </div>
+              </div>
+              <span className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 shrink-0">
+                ₪{dayCloseoutPreview.totalBusinessNet.toLocaleString()}
+              </span>
             </div>
 
             {/* Courier Breakdown Table */}
@@ -1795,6 +1878,7 @@ export default function GhostCrmDashboard() {
                       <th className="py-2.5 px-3">שליח / Courier</th>
                       <th className="py-2.5 px-3 text-center">משלוחים</th>
                       <th className="py-2.5 px-3">גבייה ברוטו</th>
+                      <th className="py-2.5 px-3 text-indigo-600 dark:text-indigo-400">שולם בביט</th>
                       <th className="py-2.5 px-3">עמלת שליח</th>
                       <th className="py-2.5 px-3 font-extrabold text-emerald-600 dark:text-emerald-400">נטו לכספת</th>
                     </tr>
@@ -1812,6 +1896,9 @@ export default function GhostCrmDashboard() {
                           <td className="py-2.5 px-3 font-mono text-slate-700 dark:text-slate-300">
                             ₪{c.gross_collected.toLocaleString()}
                           </td>
+                          <td className="py-2.5 px-3 font-mono text-indigo-600 dark:text-indigo-400">
+                            {c.bit_collected > 0 ? `₪${c.bit_collected.toLocaleString()}` : '—'}
+                          </td>
                           <td className="py-2.5 px-3 font-mono text-amber-600 dark:text-amber-400">
                             -₪{c.courier_fee.toLocaleString()}
                           </td>
@@ -1822,7 +1909,7 @@ export default function GhostCrmDashboard() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={5} className="py-6 text-center text-xs text-slate-400">
+                        <td colSpan={6} className="py-6 text-center text-xs text-slate-400">
                           {isRtl ? 'אין משלוחים פעילים במשמרת זו' : 'No active deliveries in this shift'}
                         </td>
                       </tr>
