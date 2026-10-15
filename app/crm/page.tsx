@@ -682,11 +682,25 @@ export default function GhostCrmDashboard() {
       }
     }
 
+    // Aggregate bonuses awarded to couriers in intermediate settlements during this active shift
+    const courierBonusMap = new Map<string, number>()
+    for (const s of recentSettlements || []) {
+      if (s.courier_id && !s.notes?.includes('סגירת יום רשמית')) {
+        const isWithinShift = shiftStartTime ? (s.created_at && s.created_at > shiftStartTime) : true
+        if (isWithinShift) {
+          const currentBonus = courierBonusMap.get(s.courier_id) || 0
+          courierBonusMap.set(s.courier_id, currentBonus + (Number(s.bonus_amount) || 0))
+        }
+      }
+    }
+
     let totalGross = 0
     let totalCourierPay = 0
     const couriersList: any[] = []
 
     map.forEach((entry) => {
+      const bonus = courierBonusMap.get(entry.courier_id) || 0
+      entry.courier_fee += bonus
       entry.net_to_safe = Math.max(0, entry.gross_collected - entry.courier_fee)
       totalGross += entry.gross_collected
       totalCourierPay += entry.courier_fee
@@ -702,7 +716,7 @@ export default function GhostCrmDashboard() {
       netToSafe,
       couriersList
     }
-  }, [activeShiftOrders, isRtl])
+  }, [activeShiftOrders, recentSettlements, shiftStartTime, isRtl])
 
   // Filtered Orders Calculation
   const filteredOrders = useMemo(() => {

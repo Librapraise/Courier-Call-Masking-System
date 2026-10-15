@@ -934,14 +934,35 @@ export async function POST(req: Request) {
         }
       }
 
+      // 3b. Fetch all recorded settlements in this active shift to include recorded bonuses & courier fees
+      const { data: shiftSettlements } = await supabaseAdmin
+        .from('cash_settlements')
+        .select('courier_id, courier_pay, bonus_amount, notes')
+        .eq('status', 'SETTLED')
+        .gt('created_at', shiftStart)
+        .lte('created_at', shiftEnd)
+
+      const courierBonusMap = new Map<string, number>()
+      for (const s of shiftSettlements || []) {
+        if (s.courier_id && !s.notes?.includes('סגירת יום רשמית')) {
+          const currentBonus = courierBonusMap.get(s.courier_id) || 0
+          courierBonusMap.set(s.courier_id, currentBonus + (Number(s.bonus_amount) || 0))
+        }
+      }
+
       let totalGross = 0
       let totalCourierPay = 0
+      let totalBonus = 0
       const courierBreakdown: any[] = []
 
       courierMap.forEach((entry) => {
+        const bonus = courierBonusMap.get(entry.courier_id) || 0
+        entry.bonus = bonus
+        entry.courier_fee += bonus
         entry.net_to_safe = Math.max(0, entry.gross_collected - entry.courier_fee)
         totalGross += entry.gross_collected
         totalCourierPay += entry.courier_fee
+        totalBonus += bonus
         courierBreakdown.push(entry)
       })
 
@@ -971,11 +992,11 @@ export async function POST(req: Request) {
               total_collected: cEntry.gross_collected,
               gross_collected: cEntry.gross_collected,
               courier_pay: cEntry.courier_fee,
-              bonus_amount: 0,
+              bonus_amount: cEntry.bonus,
               net_expected: cEntry.net_to_safe,
               amount_received: cEntry.net_to_safe,
               status: 'SETTLED',
-              notes: `סגירת יום רשמית (${cEntry.orders_count} משלוחים | עמלה: ₪${cEntry.courier_fee} | נטו לכספת: ₪${cEntry.net_to_safe})`
+              notes: `סגירת יום רשמית (${cEntry.orders_count} משלוחים | עמלה: ₪${cEntry.courier_fee}${cEntry.bonus > 0 ? ` [כולל ₪${cEntry.bonus} בונוס]` : ''} | נטו לכספת: ₪${cEntry.net_to_safe})`
             })
           } catch (e) {}
         }
@@ -990,7 +1011,7 @@ export async function POST(req: Request) {
         total_orders: totalOrders,
         gross_collected: totalGross,
         total_courier_pay: totalCourierPay,
-        total_bonus: 0,
+        total_bonus: totalBonus,
         net_to_safe: totalNetToSafe,
         courier_breakdown: courierBreakdown,
         notes: notes || 'סגירת יום מוצלחת',
@@ -1026,9 +1047,11 @@ export async function POST(req: Request) {
       const courierWarehouseCards = courierBreakdown
         .filter(c => c.courier_id !== 'unassigned')
         .map(c => {
-          const batYamStr = c.bat_yam_count > 0 ? ` (כולל ${c.bat_yam_count} בת ים)` : ''
+          const batYamStr = c.bat_yam_count > 0 ? `(כולל ${c.bat_yam_count} בת ים × ₪50)` : ''
+          const bonusStr = c.bonus > 0 ? `(כולל ₪${c.bonus.toLocaleString()} בונוס)` : ''
+          const detailsStr = [batYamStr, bonusStr].filter(Boolean).join(' ')
           return (
-            `🛵 *${c.courier_name}* • ${c.orders_count} משלוחים${batYamStr}\n` +
+            `🛵 *${c.courier_name}* • ${c.orders_count} משלוחים${detailsStr ? ` ${detailsStr}` : ''}\n` +
             `  ▫️ גבייה ברוטו: ₪${c.gross_collected.toLocaleString()}\n` +
             `  ▫️ עמלת שליח: ₪${c.courier_fee.toLocaleString()}\n` +
             `  📥 *מעטפה לגבייה לכספת: ₪${c.net_to_safe.toLocaleString()}*`
@@ -1040,10 +1063,11 @@ export async function POST(req: Request) {
         .filter(c => c.courier_id !== 'unassigned')
         .map(c => {
           const batYamStr = c.bat_yam_count > 0 ? ` (כולל ${c.bat_yam_count} בת ים × ₪50)` : ''
+          const bonusStr = c.bonus > 0 ? ` (כולל ₪${c.bonus.toLocaleString()} בונוס)` : ''
           return (
             `🛵 *${c.courier_name}* • ${c.orders_count} משלוחים\n` +
             `  ▫️ גבייה ברוטו: ₪${c.gross_collected.toLocaleString()}\n` +
-            `  ▫️ עמלת שליח: ₪${c.courier_fee.toLocaleString()}${batYamStr}\n` +
+            `  ▫️ עמלת שליח: ₪${c.courier_fee.toLocaleString()}${batYamStr}${bonusStr}\n` +
             `  💵 *נטו לעסק: ₪${c.net_to_safe.toLocaleString()}*`
           )
         })
@@ -1091,17 +1115,18 @@ export async function POST(req: Request) {
       const warehouseTelegramIds = new Set<string>()
       const accountantTelegramIds = new Set<string>()
 
-      // 1. Env configured
+      // 1. Warehousemen and admins receive the preferred cash & safe closeout report (Message 1)
       const whEnv = (process.env.WAREHOUSE_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
       whEnv.forEach(id => warehouseTelegramIds.add(id))
 
+      const adminIds = (process.env.ALLOWED_TELEGRAM_ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
+      adminIds.forEach(id => warehouseTelegramIds.add(id))
+
+      // 2. Dedicated accountant IDs (if specifically configured)
       const accEnv = (process.env.ACCOUNTANT_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
       accEnv.forEach(id => accountantTelegramIds.add(id))
 
-      const adminIds = (process.env.ALLOWED_TELEGRAM_ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
-      adminIds.forEach(id => accountantTelegramIds.add(id))
-
-      // 2. Fetch profiles
+      // 3. Fetch profiles from database
       try {
         const { data: allProfiles } = await supabaseAdmin.from('profiles').select('id, role, phone_number')
         const { data: crmRoster } = await supabaseAdmin.from('crm_couriers').select('phone_number, telegram_id, name')
@@ -1114,7 +1139,7 @@ export async function POST(req: Request) {
           if (metaRole === 'warehouseman' && metaTg) {
             warehouseTelegramIds.add(String(metaTg).trim())
           }
-          if ((metaRole === 'accountant' || metaRole === 'admin') && metaTg) {
+          if (metaRole === 'accountant' && metaTg) {
             accountantTelegramIds.add(String(metaTg).trim())
           }
         }
@@ -1136,6 +1161,12 @@ export async function POST(req: Request) {
           }
         }
       } catch (e) {}
+
+      // CRITICAL: Ensure warehousemen / admins NEVER receive a duplicate accountant message!
+      // They receive strictly ONE clear, organized message: the warehouse cash & safe report.
+      for (const whId of warehouseTelegramIds) {
+        accountantTelegramIds.delete(whId)
+      }
 
       let warehouseSent = 0
       let accountantSent = 0
