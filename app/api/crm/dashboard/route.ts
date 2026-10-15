@@ -1559,6 +1559,38 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: delErr.message }, { status: 400 })
       }
 
+      // 5. Notify assigned courier via Telegram if order is cancelled
+      if (order.courier_id) {
+        try {
+          const { data: assignedCourier } = await supabaseAdmin
+            .from('crm_couriers')
+            .select('id, name, telegram_id')
+            .eq('id', order.courier_id)
+            .maybeSingle()
+
+          if (assignedCourier?.telegram_id) {
+            const botToken = process.env.TELEGRAM_BOT_TOKEN
+            if (botToken) {
+              const cancelAlert = `🚫 *ביטול משלוח!*
+━━━━━━━━━━━━━━━━━━━━━
+📍 *כתובת:* ${order.address}
+🏙️ *עיר:* ${order.city || 'מרכז'}
+💰 *סכום שבוטל:* ₪${Number(order.total_price || 0).toLocaleString()} מזומן
+
+המשלוח בוטל במערכת. אין צורך לספק ללקוח או לגבות כסף.`
+
+              await sendTelegramMessage(botToken, {
+                chat_id: assignedCourier.telegram_id,
+                parse_mode: 'Markdown',
+                text: cancelAlert
+              })
+            }
+          }
+        } catch (teleErr) {
+          console.warn('[CRM API] Telegram cancel alert error:', teleErr)
+        }
+      }
+
       return NextResponse.json({ success: true, deletedOrderId: orderId })
     }
 
@@ -1707,6 +1739,83 @@ export async function POST(req: Request) {
 
       if (updateErr) {
         return NextResponse.json({ error: updateErr.message }, { status: 400 })
+      }
+
+      // 5. Notify assigned courier via Telegram if price, address, items, or courier was changed
+      const botToken = process.env.TELEGRAM_BOT_TOKEN
+      if (botToken) {
+        try {
+          const oldCourierId = currentOrder.courier_id
+          const newCourierId = updatedOrder.courier_id
+          const courierObj: any = updatedOrder.crm_couriers
+
+          // Case A: Courier Reassigned
+          if (oldCourierId !== newCourierId) {
+            // Notify old courier that order was transferred
+            if (oldCourierId) {
+              const { data: oldCourier } = await supabaseAdmin
+                .from('crm_couriers')
+                .select('telegram_id')
+                .eq('id', oldCourierId)
+                .maybeSingle()
+
+              if (oldCourier?.telegram_id) {
+                await sendTelegramMessage(botToken, {
+                  chat_id: oldCourier.telegram_id,
+                  parse_mode: 'Markdown',
+                  text: `🔄 *הזמנה הועברה לשליח אחר*
+━━━━━━━━━━━━━━━━━━━━━
+📍 *כתובת:* ${currentOrder.address}
+המשלוח הועבר לטיפול שליח אחר.`
+                })
+              }
+            }
+
+            // Notify new courier of new dispatch
+            if (courierObj?.telegram_id) {
+              await sendTelegramMessage(botToken, {
+                chat_id: courierObj.telegram_id,
+                parse_mode: 'Markdown',
+                text: `🛵 *הזמנה חדשה שובצה עבורך!*
+━━━━━━━━━━━━━━━━━━━━━
+📍 *כתובת:* ${updatedOrder.address}
+🏙️ *עיר:* ${updatedOrder.city || 'מרכז'}
+💵 *סכום לגבייה:* ₪${Number(updatedOrder.total_price || 0).toLocaleString()} מזומן
+📦 *פריטים:* ${updatedOrder.menu_items || updatedOrder.actual_items || '—'}`
+              })
+            }
+          } else if (courierObj?.telegram_id) {
+            // Case B: Same courier, check if price, items, or address changed
+            const priceChanged = Number(currentOrder.total_price) !== Number(updatedOrder.total_price)
+            const addressChanged = currentOrder.address !== updatedOrder.address || currentOrder.city !== updatedOrder.city
+            const itemsChanged = currentOrder.menu_items !== updatedOrder.menu_items || currentOrder.actual_items !== updatedOrder.actual_items
+
+            if (priceChanged || addressChanged || itemsChanged) {
+              const oldPriceNum = Number(currentOrder.total_price || 0)
+              const newPriceNum = Number(updatedOrder.total_price || 0)
+
+              const updateAlert = `⚠️ *עדכון הזמנה / שינוי סכום לגבייה!*
+━━━━━━━━━━━━━━━━━━━━━
+📍 *כתובת:* ${updatedOrder.address}${addressChanged ? ` _(עודכן מ-${currentOrder.address})_` : ''}
+🏙️ *עיר:* ${updatedOrder.city || 'מרכז'}
+💵 *סכום מעודכן לגבייה:* ₪${newPriceNum.toLocaleString()} מזומן${
+                priceChanged
+                  ? ` _(עודכן מ-₪${oldPriceNum.toLocaleString()})_`
+                  : ''
+              }
+${itemsChanged ? `📦 *פריטים מעודכנים:* ${updatedOrder.menu_items || updatedOrder.actual_items || '—'}\n` : ''}
+🕒 *שעת עדכון:* ${new Date().toLocaleTimeString('he-IL', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' })}`
+
+              await sendTelegramMessage(botToken, {
+                chat_id: courierObj.telegram_id,
+                parse_mode: 'Markdown',
+                text: updateAlert
+              })
+            }
+          }
+        } catch (teleErr) {
+          console.warn('[CRM API] Telegram order update alert error:', teleErr)
+        }
       }
 
       return NextResponse.json({ success: true, order: updatedOrder })
