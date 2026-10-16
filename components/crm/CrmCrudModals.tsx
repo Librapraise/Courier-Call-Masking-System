@@ -1030,7 +1030,7 @@ export function OrderDraftModal({
   const [manualPrice, setManualPrice] = useState('')
   const [manualMenuItems, setManualMenuItems] = useState('')
   const [manualActualItems, setManualActualItems] = useState('')
-  const [manualPaymentMethod, setManualPaymentMethod] = useState<'CASH' | 'BIT' | 'CREDIT' | 'PREPAID'>('CASH')
+  const [manualPaymentMethod, setManualPaymentMethod] = useState<'CASH' | 'BIT' | 'CRYPTO' | 'CREDIT' | 'PREPAID'>('CASH')
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1378,6 +1378,7 @@ export function OrderDraftModal({
                 >
                   <option value="CASH">{isRtl ? '💵 מזומן — גבייה מלאה ע״י שליח' : '💵 Cash — Full collect by courier'}</option>
                   <option value="BIT">{isRtl ? '📱 ביט — שולם מראש (0₪ לגבייה משליח)' : '📱 Bit — Prepaid (₪0 to collect)'}</option>
+                  <option value="CRYPTO">{isRtl ? '🪙 קריפטו — שולם מראש (0₪ לגבייה משליח)' : '🪙 Crypto — Prepaid (₪0 to collect)'}</option>
                   <option value="CREDIT">{isRtl ? '💳 כרטיס אשראי — שולם מראש (0₪ לגבייה משליח)' : '💳 Credit Card — Prepaid (₪0 to collect)'}</option>
                   <option value="PREPAID">{isRtl ? '✅ שולם מראש — (0₪ לגבייה משליח)' : '✅ Paid in Advance (₪0 to collect)'}</option>
                 </select>

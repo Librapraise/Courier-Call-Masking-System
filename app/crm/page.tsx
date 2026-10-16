@@ -714,6 +714,7 @@ export default function GhostCrmDashboard() {
       gross_collected: number
       cash_collected: number
       bit_collected: number
+      crypto_collected: number
       courier_fee: number
       net_to_safe: number
     }>()
@@ -731,6 +732,7 @@ export default function GhostCrmDashboard() {
           gross_collected: 0,
           cash_collected: 0,
           bit_collected: 0,
+          crypto_collected: 0,
           courier_fee: 0,
           net_to_safe: 0
         })
@@ -741,11 +743,13 @@ export default function GhostCrmDashboard() {
       const price = Number(o.total_price) || 0
       const payInfo = getOrderPaymentInfo(o)
       const physicalCash = payInfo.isPrepaid ? 0 : price
-      const bitAmount = payInfo.isPrepaid ? price : 0
+      const isBit = payInfo.paymentMethod === 'BIT'
+      const isCrypto = payInfo.paymentMethod === 'CRYPTO'
 
       entry.gross_collected += price
       entry.cash_collected += physicalCash
-      entry.bit_collected += bitAmount
+      entry.bit_collected += (isBit ? price : 0)
+      entry.crypto_collected = (entry.crypto_collected || 0) + (isCrypto ? price : 0)
 
       if (cId !== 'unassigned') {
         const isBatYam = isBatYamOrder(o)
@@ -767,6 +771,8 @@ export default function GhostCrmDashboard() {
 
     let totalGross = 0
     let totalPhysicalCash = 0
+    let totalBitOnly = 0
+    let totalCrypto = 0
     let totalBitCredit = 0
     let totalCourierPay = 0
     const couriersList: any[] = []
@@ -778,7 +784,9 @@ export default function GhostCrmDashboard() {
       entry.net_to_safe = Math.max(0, entry.cash_collected - entry.courier_fee)
       totalGross += entry.gross_collected
       totalPhysicalCash += entry.cash_collected
-      totalBitCredit += entry.bit_collected
+      totalBitOnly += entry.bit_collected
+      totalCrypto += (entry.crypto_collected || 0)
+      totalBitCredit += (entry.bit_collected + (entry.crypto_collected || 0))
       totalCourierPay += entry.courier_fee
       couriersList.push(entry)
     })
@@ -792,6 +800,8 @@ export default function GhostCrmDashboard() {
       totalGross,
       totalPhysicalCash,
       totalBitCredit,
+      totalBitOnly,
+      totalCrypto,
       totalCourierPay,
       netToSafe,
       creditProviderBalance,
@@ -1812,14 +1822,16 @@ export default function GhostCrmDashboard() {
 
                   <div className="p-3 sm:p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/20 border border-indigo-200/70 dark:border-indigo-900/40 space-y-1">
                     <span className="text-[10px] sm:text-[11px] font-bold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider truncate block flex items-center gap-1">
-                      <span>📱</span>
-                      <span>{isRtl ? 'שולם בביט / אשראי' : 'Bit / Credit'}</span>
+                      <span>📱🪙</span>
+                      <span>{isRtl ? 'ביט / קריפטו מראש' : 'Bit / Crypto Prepaid'}</span>
                     </span>
                     <p className="text-base sm:text-xl font-black font-mono text-indigo-600 dark:text-indigo-400">
                       ₪{dayCloseoutPreview.totalBitCredit.toLocaleString()}
                     </p>
                     <p className="text-[10px] text-indigo-600/80 dark:text-indigo-400/70 font-medium truncate">
-                      {isRtl ? 'יתרה אצל ספק אשראי' : 'Credit provider balance'}
+                      {isRtl
+                        ? `ביט: ₪${(dayCloseoutPreview.totalBitOnly || 0).toLocaleString()} | קריפטו: ₪${(dayCloseoutPreview.totalCrypto || 0).toLocaleString()}`
+                        : `Bit: ₪${(dayCloseoutPreview.totalBitOnly || 0).toLocaleString()} | Crypto: ₪${(dayCloseoutPreview.totalCrypto || 0).toLocaleString()}`}
                     </p>
                   </div>
 

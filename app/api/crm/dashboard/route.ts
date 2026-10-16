@@ -1804,6 +1804,8 @@ export async function POST(req: Request) {
       let newBrandId = currentOrder.brand_id
       let newCourierId = courierId !== undefined ? courierId : currentOrder.courier_id
       let finalRawMessage = rawMessage !== undefined ? rawMessage : currentOrder.raw_message
+      let newPaymentMethod = currentOrder.payment_method || 'CASH'
+      let newIsPrepaid = currentOrder.is_prepaid === true
 
       // If rawMessage was edited, parse it and reconcile deductions!
       if (rawMessage && typeof rawMessage === 'string' && rawMessage.trim()) {
@@ -1813,6 +1815,8 @@ export async function POST(req: Request) {
         if (parsed.menuItems) newMenuItems = parsed.menuItems
         if (parsed.actualItems) newActualItems = parsed.actualItems
         if (parsed.totalPrice > 0) newTotalPrice = parsed.totalPrice
+        newPaymentMethod = parsed.paymentMethod
+        newIsPrepaid = parsed.isPrepaid
 
         // Resolve brand if matched
         if (parsed.brand) {
@@ -1877,6 +1881,10 @@ export async function POST(req: Request) {
         if (manualFields.totalPrice !== undefined) newTotalPrice = Number(manualFields.totalPrice) || 0
         if (manualFields.menuItems !== undefined) newMenuItems = manualFields.menuItems
         if (manualFields.actualItems !== undefined) newActualItems = manualFields.actualItems
+        if (manualFields.paymentMethod !== undefined) {
+          newPaymentMethod = manualFields.paymentMethod
+          newIsPrepaid = manualFields.paymentMethod !== 'CASH'
+        }
       }
 
       // Update customer total_spent difference
@@ -1909,7 +1917,9 @@ export async function POST(req: Request) {
           total_price: newTotalPrice,
           brand_id: newBrandId,
           courier_id: newCourierId,
-          raw_message: finalRawMessage
+          raw_message: finalRawMessage,
+          payment_method: newPaymentMethod,
+          is_prepaid: newIsPrepaid
         })
         .eq('id', orderId)
         .select(`

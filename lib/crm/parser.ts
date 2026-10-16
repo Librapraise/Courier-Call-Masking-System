@@ -9,7 +9,7 @@ export interface ParsedItemDeduction {
   matchedProductCategory?: string
 }
 
-export type PaymentMethod = 'CASH' | 'BIT' | 'CREDIT' | 'PREPAID'
+export type PaymentMethod = 'CASH' | 'BIT' | 'CRYPTO' | 'CREDIT' | 'PREPAID'
 
 export interface ParsedDeliveryOrder {
   customerName: string       // Delivery address used as customer identity (e.g. "מרקו לויז - הנשיאים 57 פתח תקווה")
@@ -18,10 +18,10 @@ export interface ParsedDeliveryOrder {
   telegramHandle?: string    // @username
   customerType: string       // "קבוע", "חדש", "VIP"
   totalPrice: number         // Total order value (₪)
-  paymentMethod: PaymentMethod // 'CASH' | 'BIT' | 'CREDIT' | 'PREPAID'
-  isPrepaid: boolean         // True if customer paid via Bit / Credit / Prepaid
+  paymentMethod: PaymentMethod // 'CASH' | 'BIT' | 'CRYPTO' | 'CREDIT' | 'PREPAID'
+  isPrepaid: boolean         // True if customer paid via Bit / Crypto / Credit / Prepaid
   cashToCollect: number      // Physical cash courier must collect (0 if prepaid)
-  paymentLabel?: string      // Human-readable payment label (e.g. "שולם בביט")
+  paymentLabel?: string      // Human-readable payment label (e.g. "שולם בקריפטו", "שולם בביט")
   brand: string              // Matched from the 37 brands
   menuItems: string          // Original menu description
   actualItems: string        // Summary of actual warehouse deductions
@@ -85,7 +85,7 @@ export function extractPrice(text: string): number {
 
 /**
  * Extracts payment method and prepaid status from text.
- * Detects: ביט, אשראי, שולם מראש, שולם בביט, 0₪, לגבות 0, etc.
+ * Detects: קריפטו, ביט, אשראי, שולם מראש, שולם בביט, 0₪, לגבות 0, etc.
  */
 export function extractPaymentDetails(text: string, totalPrice: number): {
   paymentMethod: PaymentMethod
@@ -94,6 +94,10 @@ export function extractPaymentDetails(text: string, totalPrice: number): {
   paymentLabel: string
 } {
   const lower = (text || '').toLowerCase()
+
+  // Match Crypto phrases
+  const hasCrypto =
+    /(?:שולם\s+ב?קריפטו|הועבר\s+ב?קריפטו|סליקה\s+ב?קריפטו|משלמ?ת?\s+ב?קריפטו|(?:\d+\s*(?:₪|ש"ח|שח)?\s*ב?קריפטו)|(?:^|\s)בקריפטו(?:$|\s|[.,!‼️?]+)|(?:^|\s)קריפטו(?:$|\s|[.,!‼️?]+)|paid\s+(?:via|with|by|in)\s+crypto|(?:^|\s)crypto(?:$|\s|[.,!‼️?]+)|(?:שולם\s+ב?|הועבר\s+ב?)?(?:ביטקוין|בביטקוין|bitcoin|usdt|btc))/i.test(lower)
 
   // Match ONLY explicit Bit payment phrases like "שולם בביט", "הועבר בביט", "משלם בביט"
   // NEVER standalone "ביט" or "ביטים" or "בביט" (which is a warehouse strain/product category!)
@@ -106,11 +110,21 @@ export function extractPaymentDetails(text: string, totalPrice: number): {
 
   // Match explicit prepaid / zero collect phrases
   const hasPrepaid =
+    hasCrypto ||
     hasBit ||
     hasCredit ||
     /(?:שולם\s+מראש|שולם\s+קודם|prepaid|paid\s+in\s+advance|לגבות\s*:\s*0|לגבות\s+0|0\s*₪?\s*לגב(?:יי)?ה)/i.test(lower) ||
     /(?:^|\s)0\s*(?:₪|ש"ח|שח)\b/.test(lower) ||
     totalPrice === 0
+
+  if (hasCrypto) {
+    return {
+      paymentMethod: 'CRYPTO',
+      isPrepaid: true,
+      cashToCollect: 0,
+      paymentLabel: 'שולם בקריפטו'
+    }
+  }
 
   if (hasBit) {
     return {
@@ -182,11 +196,16 @@ export function getOrderPaymentInfo(order: {
 
   const isPrepaidFlag =
     effectiveIsPrepaid ||
+    effectivePaymentMethod === 'CRYPTO' ||
     effectivePaymentMethod === 'BIT' ||
     effectivePaymentMethod === 'CREDIT' ||
     effectivePaymentMethod === 'PREPAID'
 
   const lower = rawAndNotes.toLowerCase()
+
+  const hasCrypto =
+    effectivePaymentMethod === 'CRYPTO' ||
+    /(?:שולם\s+ב?קריפטו|הועבר\s+ב?קריפטו|סליקה\s+ב?קריפטו|משלמ?ת?\s+ב?קריפטו|(?:\d+\s*(?:₪|ש"ח|שח)?\s*ב?קריפטו)|(?:^|\s)בקריפטו(?:$|\s|[.,!‼️?]+)|(?:^|\s)קריפטו(?:$|\s|[.,!‼️?]+)|paid\s+(?:via|with|by|in)\s+crypto|(?:^|\s)crypto(?:$|\s|[.,!‼️?]+)|(?:שולם\s+ב?|הועבר\s+ב?)?(?:ביטקוין|בביטקוין|bitcoin|usdt|btc))/i.test(lower)
 
   const hasBit =
     effectivePaymentMethod === 'BIT' ||
@@ -198,6 +217,7 @@ export function getOrderPaymentInfo(order: {
 
   const hasPrepaid =
     isPrepaidFlag ||
+    hasCrypto ||
     hasBit ||
     hasCredit ||
     effectivePaymentMethod === 'PREPAID' ||
@@ -205,7 +225,9 @@ export function getOrderPaymentInfo(order: {
     /(?:^|\s)0\s*(?:₪|ש"ח|שח)\b/.test(lower) ||
     Number(order.total_price || 0) === 0
 
-  const method: PaymentMethod = hasBit
+  const method: PaymentMethod = hasCrypto
+    ? 'CRYPTO'
+    : hasBit
     ? 'BIT'
     : hasCredit
     ? 'CREDIT'
@@ -217,7 +239,9 @@ export function getOrderPaymentInfo(order: {
   const totalPrice = Number(order.total_price || 0)
   const cashToCollect = isPrepaid ? 0 : totalPrice
 
-  const labelHe = hasBit
+  const labelHe = hasCrypto
+    ? 'שולם בקריפטו'
+    : hasBit
     ? 'שולם בביט'
     : hasCredit
     ? 'שולם באשראי'
@@ -225,7 +249,9 @@ export function getOrderPaymentInfo(order: {
     ? 'שולם מראש'
     : 'מזומן'
 
-  const badgeText = hasBit
+  const badgeText = hasCrypto
+    ? '🪙 קריפטו'
+    : hasBit
     ? '📱 ביט'
     : hasCredit
     ? '💳 אשראי'
@@ -282,7 +308,13 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
   const trailingDeductionLines: string[] = []
   if (brandLineIndex !== -1 && brandLineIndex < rawLines.length - 1) {
     for (let i = brandLineIndex + 1; i < rawLines.length; i++) {
-      trailingDeductionLines.push(rawLines[i])
+      const line = rawLines[i]
+      // Payment indicators (e.g. "שולם בקריפטו", "שולם בביט") are never warehouse deductions
+      const isPaymentLine = /(?:שולם|הועבר|סליקה|משלמ?ת?|קריפטו|crypto|ביט|bit|אשראי|credit|prepaid)/i.test(line) &&
+        !/(?:ביטים|בביטים)/i.test(line)
+      if (!isPaymentLine) {
+        trailingDeductionLines.push(line)
+      }
     }
   }
 
@@ -324,17 +356,38 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
       city = extracted.city
     }
 
-    // 6. Check for "Slash" inventory rule: "Menu Item / Warehouse Deduction"
-    // Example: "2 גלאטו 33/ 20 רפואי האני" or "2 אלסקה/ 20 רפואי מלון"
-    if (line.includes('/')) {
-      const slashParts = line.split('/')
+    // 6. Check for Separator / "Slash" inventory rule: "Menu Item / Warehouse Deduction"
+    // Example: "2 גלאטו 33/ 20 רפואי האני" or "1 רפואי מיאמי סקי 🍄 רפואי האני"
+    let separator: string | null = null
+    if (line.includes('/')) separator = '/'
+    else if (line.includes('🍄')) separator = '🍄'
+    else if (line.includes('|')) separator = '|'
+    else if (line.includes('—')) separator = '—'
+    else if (line.includes('\\')) separator = '\\'
+
+    if (separator) {
+      const slashParts = line.split(separator)
       const menuPart = slashParts[0].trim()
-      const warehousePart = slashParts.slice(1).join('/').trim()
+      const warehousePart = slashParts.slice(1).join(' ').trim()
 
       menuLines.push(menuPart)
 
-      const matchedProd = matchWarehouseProduct(warehousePart)
+      let matchedProd = matchWarehouseProduct(warehousePart)
       if (matchedProd) {
+        // If warehouse part did not specify explicit quantity, but menu part had quantity like "1" or "2"
+        if (matchedProd.quantity === 1.0 && !/\d/.test(warehousePart)) {
+          const menuQtyMatch = menuPart.match(/(?:^|\s)(\d+(?:\.\d+)?)/)
+          if (menuQtyMatch) {
+            const packCount = parseFloat(menuQtyMatch[1])
+            if (matchedProd.product.category === 'רפואי פרימיום' && matchedProd.unit === 'g') {
+              // 1 pack of medical cannabis in Israel is 10g
+              matchedProd.quantity = packCount * 10
+            } else {
+              matchedProd.quantity = packCount
+            }
+          }
+        }
+
         deductions.push({
           menuName: menuPart,
           warehouseProductName: matchedProd.product.name,
@@ -352,11 +405,15 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
         })
       }
     } else {
-      // Check if this line is an item line (not address, phone, price, handle, or tier)
+      // Check if this line is an item line (not address, phone, price, handle, tier, or payment line)
+      const isPaymentLine = /(?:שולם|הועבר|סליקה|משלמ?ת?|קריפטו|crypto|ביט|bit|אשראי|credit|prepaid)/i.test(line) &&
+        !/(?:ביטים|בביטים)/i.test(line)
+
       const isNotMeta = !line.match(phoneRegex) &&
         !line.match(/@([A-Za-z0-9_]+)/) &&
         !line.match(/(?:₪|ש"ח|כולל משלוח)/) &&
         !line.match(/לקוח קבוע|לקוח חדש/) &&
+        !isPaymentLine &&
         line !== customerName
 
       if (isNotMeta) {

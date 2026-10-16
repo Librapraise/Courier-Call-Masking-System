@@ -962,9 +962,22 @@ export function OrdersRouteView({
                             <div className="flex flex-col gap-0.5">
                               <span>₪{Number(order.total_price || 0).toLocaleString()}</span>
                               {payInfo.isPrepaid ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60 w-fit">
-                                  <span>💳</span>
-                                  <span>{payInfo.paymentMethod === 'BIT' ? (isRtl ? 'ביט (גבייה: 0₪)' : 'Bit (Collect: ₪0)') : (isRtl ? 'שולם מראש (גבייה: 0₪)' : 'Prepaid (Collect: ₪0)')}</span>
+                                <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-bold border w-fit ${
+                                  payInfo.paymentMethod === 'CRYPTO'
+                                    ? 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200/60 dark:border-purple-800/60'
+                                    : payInfo.paymentMethod === 'BIT'
+                                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200/60 dark:border-blue-800/60'
+                                    : 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200/60 dark:border-amber-800/60'
+                                }`}>
+                                  <span>{payInfo.paymentMethod === 'CRYPTO' ? '🪙' : payInfo.paymentMethod === 'BIT' ? '📱' : '💳'}</span>
+                                  <span>
+                                    {payInfo.paymentMethod === 'CRYPTO'
+                                      ? (isRtl ? 'קריפטו (גבייה: 0₪)' : 'Crypto (Collect: ₪0)')
+                                      : payInfo.paymentMethod === 'BIT'
+                                      ? (isRtl ? 'ביט (גבייה: 0₪)' : 'Bit (Collect: ₪0)')
+                                      : (isRtl ? 'שולם מראש (גבייה: 0₪)' : 'Prepaid (Collect: ₪0)')
+                                    }
+                                  </span>
                                 </span>
                               ) : null}
                             </div>
