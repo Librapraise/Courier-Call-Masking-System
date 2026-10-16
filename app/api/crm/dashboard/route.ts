@@ -8,6 +8,54 @@ import { formatPhoneForStorage } from '@/lib/utils/phone'
 import { isStaffUser } from '@/lib/auth/roles'
 import { getIsraelDateString, getIsraelMidnightIso } from '@/lib/crm/date-utils'
 import { parseDeliveryMessage, getOrderPaymentInfo } from '@/lib/crm/parser'
+import { matchBrand } from '@/lib/crm/fuzzy-matcher'
+
+function getCleanCourierDisplayItems(order: { menu_items?: string | null; actual_items?: string | null }): string {
+  const rawItemsStr = order.menu_items || order.actual_items || '—'
+  const chunks = rawItemsStr.split(/[\n,]/).map(s => s.trim()).filter(Boolean)
+
+  const cleanedItems: string[] = []
+  for (const chunk of chunks) {
+    // 1. Skip brand lines
+    if (matchBrand(chunk)) continue
+
+    // 2. Skip verification / confirmation lines
+    if (/(?:אימות|אושר|אישור|מאושר|בדיקה)/i.test(chunk)) continue
+
+    // 3. Skip payment lines (crypto, bit, credit, cash notes)
+    if (
+      /(?:שולם|קריפטו|crypto|ביט|bit|אשראי|credit|prepaid|לגבות\s*:\s*0)/i.test(chunk) &&
+      !/(?:ביטים|בביטים)/i.test(chunk)
+    ) {
+      continue
+    }
+
+    // 4. Strip warehouse deduction if separated by slash, pipe, dash, or emoji
+    let itemText = chunk
+    if (/[\/|\\—]/.test(itemText)) {
+      itemText = itemText.split(/[\/|\\—]/)[0].trim()
+    } else {
+      const emojiMatch = itemText.match(/\s*([\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\uFE0F\p{Extended_Pictographic}])\s*/u)
+      if (emojiMatch && emojiMatch[1]) {
+        const parts = itemText.split(emojiMatch[1])
+        if (parts.length >= 2 && parts[0].trim().length > 0 && parts[1].trim().length > 0) {
+          if (/(?:רפואי|פופקורן|גדול|קאלי|באצונים|חשיש|תפזורת|שמן|עט|אוראו|האני|מלון|פיינאפל|גלקסי|דקסטר|בוטיק|חממה)/i.test(parts[1])) {
+            itemText = parts[0].trim()
+          }
+        }
+      }
+    }
+
+    // Strip lingering emojis from item display text so courier gets crisp clean name
+    itemText = itemText.replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\uFE0F\p{Extended_Pictographic}]/gu, '').trim()
+
+    if (itemText.length > 0 && !matchBrand(itemText)) {
+      cleanedItems.push(itemText)
+    }
+  }
+
+  return cleanedItems.join(', ') || order.actual_items || '—'
+}
 
 function getLocalDayCloseouts(): any[] {
   try {
@@ -588,20 +636,23 @@ export async function POST(req: Request) {
         if (botToken) {
           try {
             const payInfo = getOrderPaymentInfo(updatedOrder)
+            const payIcon = payInfo.paymentMethod === 'CRYPTO' ? '🪙' : payInfo.paymentMethod === 'BIT' ? '📱' : '💳'
             const priceDisplay = payInfo.isPrepaid
-              ? 'שולם מראש (0₪ מזומן) 💳'
+              ? `${payInfo.labelHe} (0₪ מזומן) ${payIcon}`
               : `₪${Number(updatedOrder.total_price || 0).toLocaleString()} מזומן`
 
             const prepaidWarning = payInfo.isPrepaid
-              ? `\n💳 *סטטוס תשלום:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
+              ? `\n${payIcon} *סטטוס תשלום:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
               : ''
+
+            const cleanItems = getCleanCourierDisplayItems(updatedOrder)
 
             const dispatchAlert = `🛵 *הזמנה חדשה שובצה עבורך!*
 ━━━━━━━━━━━━━━━━━━━━━
 📍 *כתובת:* ${updatedOrder.address}
 🏙️ *עיר:* ${updatedOrder.city || 'מרכז'}
 💵 *סכום לגבייה:* ${priceDisplay}${prepaidWarning}
-📦 *פריטים:* ${updatedOrder.menu_items || updatedOrder.actual_items || '—'}`
+📦 *פריטים:* ${cleanItems}`
 
             await sendTelegramMessage(botToken, {
               chat_id: assignedCourier.telegram_id,
@@ -1967,12 +2018,14 @@ export async function POST(req: Request) {
             }
 
             const payInfo = getOrderPaymentInfo(updatedOrder)
+            const payIcon = payInfo.paymentMethod === 'CRYPTO' ? '🪙' : payInfo.paymentMethod === 'BIT' ? '📱' : '💳'
             const priceDisplay = payInfo.isPrepaid
-              ? 'שולם מראש (0₪ מזומן) 💳'
+              ? `${payInfo.labelHe} (0₪ מזומן) ${payIcon}`
               : `₪${Number(updatedOrder.total_price || 0).toLocaleString()} מזומן`
             const prepaidWarning = payInfo.isPrepaid
-              ? `\n💳 *סטטוס תשלום:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
+              ? `\n${payIcon} *סטטוס תשלום:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
               : ''
+            const cleanItems = getCleanCourierDisplayItems(updatedOrder)
 
             // Notify new courier of new dispatch
             if (courierObj?.telegram_id) {
@@ -1984,7 +2037,7 @@ export async function POST(req: Request) {
 📍 *כתובת:* ${updatedOrder.address}
 🏙️ *עיר:* ${updatedOrder.city || 'מרכז'}
 💵 *סכום לגבייה:* ${priceDisplay}${prepaidWarning}
-📦 *פריטים:* ${updatedOrder.menu_items || updatedOrder.actual_items || '—'}`
+📦 *פריטים:* ${cleanItems}`
               })
             }
           } else if (courierObj?.telegram_id) {
@@ -1997,12 +2050,14 @@ export async function POST(req: Request) {
               const oldPriceNum = Number(currentOrder.total_price || 0)
               const newPriceNum = Number(updatedOrder.total_price || 0)
               const payInfo = getOrderPaymentInfo(updatedOrder)
+              const payIcon = payInfo.paymentMethod === 'CRYPTO' ? '🪙' : payInfo.paymentMethod === 'BIT' ? '📱' : '💳'
               const priceDisplay = payInfo.isPrepaid
-                ? 'שולם מראש (0₪ מזומן) 💳'
+                ? `${payInfo.labelHe} (0₪ מזומן) ${payIcon}`
                 : `₪${newPriceNum.toLocaleString()} מזומן`
               const prepaidWarning = payInfo.isPrepaid
-                ? `\n💳 *הנחיה לשליח:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
+                ? `\n${payIcon} *הנחיה לשליח:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
                 : ''
+              const cleanItems = getCleanCourierDisplayItems(updatedOrder)
 
               const updateAlert = `⚠️ *עדכון הזמנה / שינוי סכום לגבייה!*
 ━━━━━━━━━━━━━━━━━━━━━
@@ -2013,7 +2068,7 @@ export async function POST(req: Request) {
                   ? ` _(עודכן מ-₪${oldPriceNum.toLocaleString()})_`
                   : ''
               }${prepaidWarning}
-${itemsChanged ? `📦 *פריטים מעודכנים:* ${updatedOrder.menu_items || updatedOrder.actual_items || '—'}\n` : ''}
+${itemsChanged ? `📦 *פריטים מעודכנים:* ${cleanItems}\n` : ''}
 🕒 *שעת עדכון:* ${new Date().toLocaleTimeString('he-IL', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' })}`
 
               await sendTelegramMessage(botToken, {

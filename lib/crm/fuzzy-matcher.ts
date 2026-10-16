@@ -33,8 +33,9 @@ export function levenshteinDistance(s1: string, s2: string): number {
 export function normalizeHebrewText(text: string): string {
   if (!text) return ''
   return text
-    .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '') // Emojis
-    .replace(/[–—\-.,\/#!$%\^&\*;:{}=\-_`~()]/g, ' ')
+    .replace(/\p{Extended_Pictographic}|\p{Emoji}/gu, '') // Strip ALL Unicode emojis & symbols
+    .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}]/gu, '')
+    .replace(/[–—\-.,\/#!$%\^&\*;:{}=\-_`~()!?‼\uFE0F]/gu, ' ')
     .replace(/["']/g, '') // remove quotes like in צ'יפס -> ציפס
     .replace(/\s+/g, ' ')
     .trim()
@@ -48,22 +49,40 @@ export function normalizeHebrewText(text: string): string {
 export function matchBrand(rawText: string): string | null {
   if (!rawText) return null
   const cleaned = normalizeHebrewText(rawText)
+  if (!cleaned || cleaned.length < 2) return null
+
+  // Strip leading Hebrew definite article 'ה' (e.g. "מחתרת בני אור" vs "המחתרת בני אור")
+  const stripHePrefix = (s: string) => s.replace(/^ה(?=[\u0590-\u05FF]{3,})/i, '').trim()
+  const cleanedNoHe = stripHePrefix(cleaned)
 
   // 1. Exact or substring match
   for (const brand of BRANDS_LIST) {
     const cleanBrand = normalizeHebrewText(brand)
-    if (cleaned === cleanBrand || cleaned.includes(cleanBrand) || cleanBrand.includes(cleaned)) {
+    const cleanBrandNoHe = stripHePrefix(cleanBrand)
+
+    if (
+      cleaned === cleanBrand ||
+      cleanedNoHe === cleanBrandNoHe ||
+      (cleaned.length >= 4 && cleanBrand.includes(cleaned)) ||
+      (cleanBrand.length >= 4 && cleaned.includes(cleanBrand)) ||
+      (cleanedNoHe.length >= 4 && cleanBrandNoHe.includes(cleanedNoHe)) ||
+      (cleanBrandNoHe.length >= 4 && cleanedNoHe.includes(cleanBrandNoHe))
+    ) {
       return brand
     }
   }
 
-  // 2. Fuzzy match with Levenshtein distance <= 2
+  // 2. Fuzzy match with Levenshtein distance <= 3
   let bestMatch: string | null = null
-  let minDistance = 3
+  let minDistance = 4
 
   for (const brand of BRANDS_LIST) {
     const cleanBrand = normalizeHebrewText(brand)
-    const dist = levenshteinDistance(cleaned, cleanBrand)
+    const cleanBrandNoHe = stripHePrefix(cleanBrand)
+    const dist = Math.min(
+      levenshteinDistance(cleaned, cleanBrand),
+      levenshteinDistance(cleanedNoHe, cleanBrandNoHe)
+    )
     if (dist < minDistance) {
       minDistance = dist
       bestMatch = brand

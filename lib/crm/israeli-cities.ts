@@ -87,6 +87,7 @@ export const ISRAELI_CITIES: string[] = [
   'גדרה',
   'מזכרת בתיה',
   'קדימה צורן',
+  'קדימה',
   'תל מונד',
   'אבן יהודה',
   'כוכב יאיר',
@@ -114,12 +115,22 @@ export const ISRAELI_CITIES: string[] = [
   'ירוחם'
 ].sort((a, b) => b.length - a.length)
 
+// Common neighborhood or industrial zone mappings to primary cities
+const CITY_ALIASES: Record<string, string> = {
+  'סגולה': 'פתח תקווה',
+  'קריית אריה': 'פתח תקווה',
+  'רמת החייל': 'תל אביב',
+  'פלורנטין': 'תל אביב',
+  'יפו': 'תל אביב',
+  'נווה צדק': 'תל אביב',
+  'קדימה צורן': 'קדימה'
+}
+
 /**
  * Extracts and normalizes city from a Hebrew delivery address string.
  * Example: 'מרקו לויז - הנשיאים 57 פתח תקווה' -> 'פתח תקווה'
- * Example: 'רמבם 56 ראשון לציון' -> 'ראשון לציון'
- * Example: 'סמטת העליה 6 בני עייש' -> 'בני עייש'
- * Example: 'לשפר 18 תל אביב' -> 'תל אביב'
+ * Example: 'שדרות האיכרים 10 סגולה' -> 'פתח תקווה'
+ * Example: 'היסמין 6 קדימה' -> 'קדימה'
  */
 export function extractCityFromAddress(address: string): { city: string; cleanAddress: string } {
   if (!address) return { city: 'אחר', cleanAddress: '' }
@@ -129,14 +140,40 @@ export function extractCityFromAddress(address: string): { city: string; cleanAd
     .replace(/\s+/g, ' ')
     .trim()
 
+  // 1. Check for prominent neighborhood/zone aliases first
+  for (const [alias, primaryCity] of Object.entries(CITY_ALIASES)) {
+    const aliasRegex = new RegExp(`(^|\\s)${alias}(\\s|$)`, 'i')
+    if (aliasRegex.test(normalized)) {
+      return {
+        city: primaryCity,
+        cleanAddress: address.trim()
+      }
+    }
+  }
+
+  // 2. Scan for city matches with street prefix protection
+  // Note: If address starts with "שדרות [שם רחוב] [מספר]", "שדרות" is the boulevard street prefix, not the city!
+  const isSderotStreetPrefix = /^שדרות\s+[\u0590-\u05FF]+.*?\d+/i.test(normalized)
+
   for (const city of ISRAELI_CITIES) {
-    // Check if the address contains or ends with the city
+    if (city === 'שדרות' && isSderotStreetPrefix) {
+      continue // Skip treating the leading boulevard street prefix as the southern city of Sderot
+    }
+
     const regex = new RegExp(`(^|\\s)${city}(\\s|$)`, 'i')
     if (regex.test(normalized)) {
       return {
         city,
         cleanAddress: address.trim()
       }
+    }
+  }
+
+  // If address started with boulevard prefix and no other city matched, check if "שדרות" was at the end
+  if (isSderotStreetPrefix) {
+    const endsWithSderot = /(?:^|\s)שדרות$/i.test(normalized)
+    if (endsWithSderot) {
+      return { city: 'שדרות', cleanAddress: address.trim() }
     }
   }
 

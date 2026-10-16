@@ -357,13 +357,23 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
     }
 
     // 6. Check for Separator / "Slash" inventory rule: "Menu Item / Warehouse Deduction"
-    // Example: "2 גלאטו 33/ 20 רפואי האני" or "1 רפואי מיאמי סקי 🍄 רפואי האני"
+    // Examples: "2 גלאטו 33/ 20 רפואי האני", "1 רפואי מיאמי סקי 🔥 רפואי האני", "100 ביטים גנטיקה ❤️ רפואי פיינאפל"
     let separator: string | null = null
     if (line.includes('/')) separator = '/'
-    else if (line.includes('🍄')) separator = '🍄'
     else if (line.includes('|')) separator = '|'
     else if (line.includes('—')) separator = '—'
     else if (line.includes('\\')) separator = '\\'
+    else {
+      // Check if an emoji is used as a separator between menu item and warehouse strain
+      const emojiMatch = line.match(/\s*([\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\uFE0F\p{Extended_Pictographic}])\s*/u)
+      if (emojiMatch && emojiMatch[1]) {
+        const candidateSep = emojiMatch[1]
+        const testParts = line.split(candidateSep)
+        if (testParts.length >= 2 && testParts[0].trim().length > 0 && testParts[1].trim().length > 0) {
+          separator = candidateSep
+        }
+      }
+    }
 
     if (separator) {
       const slashParts = line.split(separator)
@@ -374,14 +384,14 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
 
       let matchedProd = matchWarehouseProduct(warehousePart)
       if (matchedProd) {
-        // If warehouse part did not specify explicit quantity, but menu part had quantity like "1" or "2"
+        // If warehouse part did not specify explicit quantity, but menu part had quantity like "1", "100"
         if (matchedProd.quantity === 1.0 && !/\d/.test(warehousePart)) {
           const menuQtyMatch = menuPart.match(/(?:^|\s)(\d+(?:\.\d+)?)/)
           if (menuQtyMatch) {
             const packCount = parseFloat(menuQtyMatch[1])
-            if (matchedProd.product.category === 'רפואי פרימיום' && matchedProd.unit === 'g') {
+            if (packCount === 1.0 && matchedProd.product.category === 'רפואי פרימיום' && matchedProd.unit === 'g') {
               // 1 pack of medical cannabis in Israel is 10g
-              matchedProd.quantity = packCount * 10
+              matchedProd.quantity = 10
             } else {
               matchedProd.quantity = packCount
             }
@@ -405,15 +415,20 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
         })
       }
     } else {
-      // Check if this line is an item line (not address, phone, price, handle, tier, or payment line)
+      // Check if this line is an item line (not address, phone, price, handle, tier, brand, or payment line)
       const isPaymentLine = /(?:שולם|הועבר|סליקה|משלמ?ת?|קריפטו|crypto|ביט|bit|אשראי|credit|prepaid)/i.test(line) &&
         !/(?:ביטים|בביטים)/i.test(line)
+
+      const isBrandLine = Boolean(matchBrand(line))
+      const isVerificationLine = /(?:אימות|אושר|אישור\s*הזמנה|מאושר|בדיקה)/i.test(line)
 
       const isNotMeta = !line.match(phoneRegex) &&
         !line.match(/@([A-Za-z0-9_]+)/) &&
         !line.match(/(?:₪|ש"ח|כולל משלוח)/) &&
         !line.match(/לקוח קבוע|לקוח חדש/) &&
         !isPaymentLine &&
+        !isBrandLine &&
+        !isVerificationLine &&
         line !== customerName
 
       if (isNotMeta) {
