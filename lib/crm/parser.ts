@@ -248,7 +248,10 @@ export function getOrderPaymentInfo(order: {
  */
 export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
   const cleanRaw = rawText.trim()
-  const rawLines = cleanRaw.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+  const rawLines = cleanRaw
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0 && !/^(?:אתמול ב-|היום ב-|\d{1,2}[:.]\d{2}\s|forwarded from)/i.test(l))
 
   let customerName = ''
   let city = ''
