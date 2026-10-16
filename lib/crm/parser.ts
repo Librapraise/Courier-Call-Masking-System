@@ -95,32 +95,22 @@ export function extractPaymentDetails(text: string, totalPrice: number): {
 } {
   const lower = (text || '').toLowerCase()
 
+  // Match ONLY explicit Bit payment phrases like "שולם בביט", "הועבר בביט", "משלם בביט"
+  // NEVER standalone "ביט" or "ביטים" or "בביט" (which is a warehouse strain/product category!)
   const hasBit =
-    lower.includes('ביט') ||
-    lower.includes('בביט') ||
-    lower.includes('שולם בביט') ||
-    lower.includes('שולם ביט') ||
-    /\bbit\b/i.test(lower)
+    /(?:שולם\s+ב?ביט|הועבר\s+ב?ביט|סליקה\s+ב?ביט|באפליקציית\s+ביט|משלמ?ת?\s+ב?ביט|(?:\d+\s*(?:₪|ש"ח|שח)?\s*בביט)|paid\s+(?:via|with|by|in)\s+bit)/i.test(lower)
 
+  // Match explicit credit phrases
   const hasCredit =
-    lower.includes('אשראי') ||
-    lower.includes('באשראי') ||
-    lower.includes('שולם באשראי') ||
-    /\bcredit\b/i.test(lower)
+    /(?:שולם\s+ב?אשראי|סליקה\s+ב?אשראי|באשראי|כרטיס\s+אשראי|paid\s+(?:via|with|by|in)\s+credit)/i.test(lower)
 
+  // Match explicit prepaid / zero collect phrases
   const hasPrepaid =
     hasBit ||
     hasCredit ||
-    lower.includes('שולם מראש') ||
-    lower.includes('שולם') ||
-    lower.includes('prepaid') ||
-    lower.includes('paid in advance') ||
-    lower.includes('לגבות 0') ||
-    lower.includes('לגבות: 0') ||
-    lower.includes('0₪ לגבייה') ||
-    lower.includes('0 לגבייה') ||
-    lower.includes('0 לגביה') ||
-    /(?:^|\s)0\s*(?:₪|ש"ח|שח)/.test(lower)
+    /(?:שולם\s+מראש|שולם\s+קודם|prepaid|paid\s+in\s+advance|לגבות\s*:\s*0|לגבות\s+0|0\s*₪?\s*לגב(?:יי)?ה)/i.test(lower) ||
+    /(?:^|\s)0\s*(?:₪|ש"ח|שח)\b/.test(lower) ||
+    totalPrice === 0
 
   if (hasBit) {
     return {
@@ -176,48 +166,43 @@ export function getOrderPaymentInfo(order: {
   labelHe: string
   badgeText: string
 } {
-  const isPrepaidFlag =
-    order.is_prepaid === true ||
-    order.payment_method === 'BIT' ||
-    order.payment_method === 'CREDIT' ||
-    order.payment_method === 'PREPAID'
-
-  const combined = [
+  // Check if order was falsely flagged as BIT because of the warehouse product "ביטים"
+  const rawAndNotes = [
     order.raw_message || '',
-    order.notes || '',
-    order.menu_items || '',
-    order.payment_method || ''
-  ].join(' ').toLowerCase()
+    order.notes || ''
+  ].join(' ')
+
+  const isFalseBitProduct =
+    order.payment_method === 'BIT' &&
+    /(?:ביטים|בביטים|\bbits\b)/i.test([order.raw_message, order.menu_items].join(' ')) &&
+    !/(?:שולם\s+ב?ביט|הועבר\s+ב?ביט|סליקה\s+ב?ביט|באפליקציית\s+ביט|משלמ?ת?\s+(?:\d+\s+)?ב?ביט|שולם\s+מראש|לגבות\s*:\s*0|0\s*₪?\s*לגב(?:יי)?ה)/i.test(order.raw_message || '')
+
+  const effectivePaymentMethod = isFalseBitProduct ? 'CASH' : (order.payment_method || 'CASH')
+  const effectiveIsPrepaid = isFalseBitProduct ? false : (order.is_prepaid === true)
+
+  const isPrepaidFlag =
+    effectiveIsPrepaid ||
+    effectivePaymentMethod === 'BIT' ||
+    effectivePaymentMethod === 'CREDIT' ||
+    effectivePaymentMethod === 'PREPAID'
+
+  const lower = rawAndNotes.toLowerCase()
 
   const hasBit =
-    order.payment_method === 'BIT' ||
-    combined.includes('ביט') ||
-    combined.includes('בביט') ||
-    combined.includes('שולם בביט') ||
-    combined.includes('שולם ביט') ||
-    /\bbit\b/i.test(combined)
+    effectivePaymentMethod === 'BIT' ||
+    /(?:שולם\s+ב?ביט|הועבר\s+ב?ביט|סליקה\s+ב?ביט|באפליקציית\s+ביט|משלמ?ת?\s+ב?ביט|(?:\d+\s*(?:₪|ש"ח|שח)?\s*בביט)|paid\s+(?:via|with|by|in)\s+bit)/i.test(lower)
 
   const hasCredit =
-    order.payment_method === 'CREDIT' ||
-    combined.includes('אשראי') ||
-    combined.includes('באשראי') ||
-    combined.includes('שולם באשראי') ||
-    /\bcredit\b/i.test(combined)
+    effectivePaymentMethod === 'CREDIT' ||
+    /(?:שולם\s+ב?אשראי|סליקה\s+ב?אשראי|באשראי|כרטיס\s+אשראי|paid\s+(?:via|with|by|in)\s+credit)/i.test(lower)
 
   const hasPrepaid =
     isPrepaidFlag ||
     hasBit ||
     hasCredit ||
-    order.payment_method === 'PREPAID' ||
-    combined.includes('שולם מראש') ||
-    combined.includes('שולם') ||
-    combined.includes('prepaid') ||
-    combined.includes('paid in advance') ||
-    combined.includes('לגבות 0') ||
-    combined.includes('לגבות: 0') ||
-    combined.includes('0₪ לגבייה') ||
-    combined.includes('0 לגבייה') ||
-    combined.includes('0 לגביה') ||
+    effectivePaymentMethod === 'PREPAID' ||
+    /(?:שולם\s+מראש|שולם\s+קודם|prepaid|paid\s+in\s+advance|לגבות\s*:\s*0|לגבות\s+0|0\s*₪?\s*לגב(?:יי)?ה)/i.test(lower) ||
+    /(?:^|\s)0\s*(?:₪|ש"ח|שח)\b/.test(lower) ||
     Number(order.total_price || 0) === 0
 
   const method: PaymentMethod = hasBit
