@@ -72,6 +72,15 @@ const testMessages = [
 
 מחתרת בני אור
 שולם בקריפטו ‼️`
+  },
+  {
+    name: 'Sample 7: Hakav Shel Assaf Brand + Boutique + Gift Hashish',
+    text: `ריינס 39 תל אביב 
+0525135512
+10ג בוטיק 3 זנים 
+600₪ כולל משלוח
+חשיש מתנה 
+הקוו של אסף`
   }
 ]
 

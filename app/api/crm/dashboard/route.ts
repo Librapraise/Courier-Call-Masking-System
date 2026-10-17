@@ -548,10 +548,36 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'Missing orderId' }, { status: 400 })
       }
 
+      // Check previous courier assignment first
+      const { data: previousOrder } = await supabaseAdmin
+        .from('crm_orders')
+        .select(`
+          id,
+          courier_id,
+          address,
+          city,
+          crm_couriers:courier_id (
+            id,
+            name,
+            telegram_id
+          )
+        `)
+        .eq('id', orderId)
+        .maybeSingle()
+
+      const oldCourierId = previousOrder?.courier_id || null
+      const oldCourier: any = (previousOrder as any)?.crm_couriers
+      const newCourierId = courierId || null
+
+      if (oldCourierId === newCourierId) {
+        // Nothing changed, avoid duplicate alerts
+        return NextResponse.json({ success: true, message: 'No courier change' })
+      }
+
       // 1. Update order in crm_orders and select full details
       const { data: updatedOrder, error: updateErr } = await supabaseAdmin
         .from('crm_orders')
-        .update({ courier_id: courierId || null })
+        .update({ courier_id: newCourierId })
         .eq('id', orderId)
         .select(`
           id,
@@ -637,10 +663,37 @@ export async function POST(req: Request) {
         }
       }
 
-      // 3. Send instant Telegram dispatch notification to the courier
-      if (assignedCourier?.telegram_id) {
-        const botToken = process.env.TELEGRAM_BOT_TOKEN
-        if (botToken) {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN
+      if (botToken) {
+        // A. Notify previous courier if reassigned away or unassigned
+        if (oldCourier?.telegram_id && oldCourier.telegram_id !== assignedCourier?.telegram_id) {
+          try {
+            const revocationMsg = newCourierId
+              ? `🔄 *הזמנה הועברה לשליח אחר*
+━━━━━━━━━━━━━━━━━━━━━
+📍 *כתובת:* ${updatedOrder.address}
+🏙️ *עיר:* ${updatedOrder.city || 'מרכז'}
+
+המשלוח הועבר לטיפול שליח אחר — אין צורך לבצע אותו.`
+              : `🚫 *ביטול שיבוץ משלוח*
+━━━━━━━━━━━━━━━━━━━━━
+📍 *כתובת:* ${updatedOrder.address}
+🏙️ *עיר:* ${updatedOrder.city || 'מרכז'}
+
+השיבוץ בוטל במערכת — אין צורך לספק או לגבות.`
+
+            await sendTelegramMessage(botToken, {
+              chat_id: oldCourier.telegram_id,
+              parse_mode: 'Markdown',
+              text: revocationMsg
+            })
+          } catch (oldErr) {
+            console.warn('[CRM API] Telegram revocation alert error:', oldErr)
+          }
+        }
+
+        // B. Send instant Telegram dispatch notification to the NEW courier (strictly NO items!)
+        if (assignedCourier?.telegram_id) {
           try {
             const payInfo = getOrderPaymentInfo(updatedOrder)
             const payIcon = payInfo.paymentMethod === 'CRYPTO' ? '🪙' : payInfo.paymentMethod === 'BIT' ? '📱' : '💳'
@@ -652,14 +705,11 @@ export async function POST(req: Request) {
               ? `\n${payIcon} *סטטוס תשלום:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
               : ''
 
-            const cleanItems = getCleanCourierDisplayItems(updatedOrder)
-
             const dispatchAlert = `🛵 *הזמנה חדשה שובצה עבורך!*
 ━━━━━━━━━━━━━━━━━━━━━
 📍 *כתובת:* ${updatedOrder.address}
 🏙️ *עיר:* ${updatedOrder.city || 'מרכז'}
-💵 *סכום לגבייה:* ${priceDisplay}${prepaidWarning}
-📦 *פריטים:* ${cleanItems}`
+💵 *סכום לגבייה:* ${priceDisplay}${prepaidWarning}`
 
             await sendTelegramMessage(botToken, {
               chat_id: assignedCourier.telegram_id,
@@ -2040,9 +2090,8 @@ export async function POST(req: Request) {
             const prepaidWarning = payInfo.isPrepaid
               ? `\n${payIcon} *סטטוס תשלום:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
               : ''
-            const cleanItems = getCleanCourierDisplayItems(updatedOrder)
 
-            // Notify new courier of new dispatch
+            // Notify new courier of new dispatch (strictly NO items!)
             if (courierObj?.telegram_id) {
               await sendTelegramMessage(botToken, {
                 chat_id: courierObj.telegram_id,
@@ -2051,17 +2100,15 @@ export async function POST(req: Request) {
 ━━━━━━━━━━━━━━━━━━━━━
 📍 *כתובת:* ${updatedOrder.address}
 🏙️ *עיר:* ${updatedOrder.city || 'מרכז'}
-💵 *סכום לגבייה:* ${priceDisplay}${prepaidWarning}
-📦 *פריטים:* ${cleanItems}`
+💵 *סכום לגבייה:* ${priceDisplay}${prepaidWarning}`
               })
             }
           } else if (courierObj?.telegram_id) {
-            // Case B: Same courier, check if price, items, or address changed
+            // Case B: Same courier, check if price or address changed (couriers never see items)
             const priceChanged = Number(currentOrder.total_price) !== Number(updatedOrder.total_price)
             const addressChanged = currentOrder.address !== updatedOrder.address || currentOrder.city !== updatedOrder.city
-            const itemsChanged = currentOrder.menu_items !== updatedOrder.menu_items || currentOrder.actual_items !== updatedOrder.actual_items
 
-            if (priceChanged || addressChanged || itemsChanged) {
+            if (priceChanged || addressChanged) {
               const oldPriceNum = Number(currentOrder.total_price || 0)
               const newPriceNum = Number(updatedOrder.total_price || 0)
               const payInfo = getOrderPaymentInfo(updatedOrder)
@@ -2072,7 +2119,6 @@ export async function POST(req: Request) {
               const prepaidWarning = payInfo.isPrepaid
                 ? `\n${payIcon} *הנחיה לשליח:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
                 : ''
-              const cleanItems = getCleanCourierDisplayItems(updatedOrder)
 
               const updateAlert = `⚠️ *עדכון הזמנה / שינוי סכום לגבייה!*
 ━━━━━━━━━━━━━━━━━━━━━
@@ -2083,7 +2129,6 @@ export async function POST(req: Request) {
                   ? ` _(עודכן מ-₪${oldPriceNum.toLocaleString()})_`
                   : ''
               }${prepaidWarning}
-${itemsChanged ? `📦 *פריטים מעודכנים:* ${cleanItems}\n` : ''}
 🕒 *שעת עדכון:* ${new Date().toLocaleTimeString('he-IL', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' })}`
 
               await sendTelegramMessage(botToken, {
