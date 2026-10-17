@@ -234,33 +234,32 @@ export async function GET() {
       }
     }
 
-    const defaultShiftStart = getIsraelMidnightIso()
-
-    const isRecentCloseout = latestDayCloseout && (new Date().getTime() - new Date(latestDayCloseout.created_at).getTime() < 36 * 3600 * 1000)
-    const shiftStartIso = isRecentCloseout
+    // Active shift boundary: ONLY resets when a Z-Report (day closeout) is executed
+    const shiftStartIso = latestDayCloseout
       ? (latestDayCloseout.shift_end || latestDayCloseout.created_at)
-      : defaultShiftStart
+      : null
 
     const allOrders = orders || []
-    const todayOrders = isRecentCloseout
+    // Active shift orders: all orders created since the last Z-Report (or all unsettled if no closeout yet)
+    const todayOrders = shiftStartIso
       ? allOrders.filter(o => o.order_date > shiftStartIso)
-      : allOrders.filter(o => o.order_date >= defaultShiftStart)
+      : allOrders.filter(o => !o.is_settled)
     const totalDeliveriesToday = todayOrders.length
     
-    // Courier physical cash currently in the street/courier hands (UNSETTLED only, excluding Bit/prepaid)
+    // Courier physical cash currently in the street/courier hands (UNSETTLED only, excluding Bit/crypto/prepaid)
     const courierCashToday = todayOrders
       .filter(o => !o.is_settled && !getOrderPaymentInfo(o).isPrepaid)
       .reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
     
-    // Total gross volume across all deliveries today (both settled and pending, cash + bit)
+    // Total gross volume across all deliveries in active shift (both settled and pending, cash + bit + crypto)
     const totalCashToday = todayOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
 
-    // Total amount in Bit / credit provider today (prepaid)
+    // Total amount in Bit / crypto / prepaid in active shift
     const totalBitCreditToday = todayOrders
       .filter(o => getOrderPaymentInfo(o).isPrepaid)
       .reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
     
-    // Reconciled physical cash already handed over to the warehouse today
+    // Reconciled physical cash already handed over to the warehouse in this shift
     const reconciledCashToday = todayOrders
       .filter(o => o.is_settled && !getOrderPaymentInfo(o).isPrepaid)
       .reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
@@ -368,12 +367,17 @@ export async function GET() {
       }
     })
 
-    // Fetch today's cash settlements to compute exact net handed to warehouseman per courier
-    const { data: todaySettlements } = await supabaseAdmin
+    // Fetch active shift cash settlements to compute exact net handed to warehouseman per courier
+    let settlementsQuery = supabaseAdmin
       .from('cash_settlements')
       .select('courier_id, amount_received, net_expected, gross_collected')
-      .gte('created_at', shiftStartIso)
       .eq('status', 'SETTLED')
+
+    if (shiftStartIso) {
+      settlementsQuery = settlementsQuery.gte('created_at', shiftStartIso)
+    }
+
+    const { data: todaySettlements } = await settlementsQuery
 
     const courierSettledNetMap: Record<string, number> = {}
     ;(todaySettlements || []).forEach(s => {
@@ -687,8 +691,8 @@ export async function POST(req: Request) {
 
       const bonus = Math.max(0, Number(bonusAmount) || 0)
 
-      // Determine active shift start for this courier
-      let shiftStartIso = getIsraelMidnightIso()
+      // Determine active shift start for this courier (resets ONLY on Z-Report / day closeout)
+      let shiftStartIso: string | null = null
       try {
         const { data: latestCloseout } = await supabaseAdmin
           .from('crm_day_closeouts')
@@ -696,12 +700,12 @@ export async function POST(req: Request) {
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle()
-        if (latestCloseout && (Date.now() - new Date(latestCloseout.created_at).getTime() < 36 * 3600 * 1000)) {
+        if (latestCloseout) {
           shiftStartIso = latestCloseout.shift_end || latestCloseout.created_at
         }
       } catch (e) {}
 
-      const { data: ordersToSettle } = await supabaseAdmin
+      let settleQuery = supabaseAdmin
         .from('crm_orders')
         .select(`
           id,
@@ -715,8 +719,13 @@ export async function POST(req: Request) {
           )
         `)
         .eq('courier_id', courierId)
-        .gt('order_date', shiftStartIso)
         .eq('is_settled', false)
+
+      if (shiftStartIso) {
+        settleQuery = settleQuery.gt('order_date', shiftStartIso)
+      }
+
+      const { data: ordersToSettle } = await settleQuery
 
       const orders = ordersToSettle || []
 
@@ -1025,26 +1034,29 @@ export async function POST(req: Request) {
         if (localCo.length > 0) latestCloseout = localCo[0]
       }
 
-      const defaultShiftStart = getIsraelMidnightIso()
-      const isCloseoutRecent = latestCloseout && (new Date().getTime() - new Date(latestCloseout.created_at).getTime() < 36 * 3600 * 1000)
-      const shiftStart = isCloseoutRecent
+      // Active shift boundary: ONLY resets when a Z-Report (day closeout) is executed
+      const shiftStart = latestCloseout
         ? (latestCloseout.shift_end || latestCloseout.created_at)
-        : defaultShiftStart
+        : null
 
       const shiftEnd = new Date().toISOString()
 
       // 2. Fetch all orders belonging to this active shift
-      const query = supabaseAdmin
+      let closeoutOrdersQuery = supabaseAdmin
         .from('crm_orders')
         .select(`
-          id, total_price, courier_id, city, address, raw_message, is_settled, order_date,
+          id, total_price, courier_id, city, address, raw_message, is_settled, order_date, payment_method, is_prepaid,
           crm_customers:customer_id (address_name, city),
           crm_couriers(id, name, phone_number, telegram_id)
         `)
       
-      const { data: shiftOrders } = isCloseoutRecent
-        ? await query.gt('order_date', shiftStart).lte('order_date', shiftEnd)
-        : await query.gte('order_date', shiftStart).lte('order_date', shiftEnd)
+      if (shiftStart) {
+        closeoutOrdersQuery = closeoutOrdersQuery.gt('order_date', shiftStart).lte('order_date', shiftEnd)
+      } else {
+        closeoutOrdersQuery = closeoutOrdersQuery.lte('order_date', shiftEnd).eq('is_settled', false)
+      }
+
+      const { data: shiftOrders } = await closeoutOrdersQuery
 
       const orders = shiftOrders || []
       const totalOrders = orders.length
@@ -1179,7 +1191,7 @@ export async function POST(req: Request) {
       const totalOverallBusinessProfit = totalNetToSafe + creditProviderBalance
 
       // 4. Mark all orders in this shift as settled
-      if (isCloseoutRecent) {
+      if (shiftStart) {
         await supabaseAdmin
           .from('crm_orders')
           .update({ is_settled: true })
@@ -1189,7 +1201,6 @@ export async function POST(req: Request) {
         await supabaseAdmin
           .from('crm_orders')
           .update({ is_settled: true })
-          .gte('order_date', shiftStart)
           .lte('order_date', shiftEnd)
       }
 

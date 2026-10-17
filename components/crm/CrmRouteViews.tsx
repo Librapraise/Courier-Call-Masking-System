@@ -725,13 +725,12 @@ export function OrdersRouteView({
   onEditOrder?: (o: Order) => void
   onDeleteOrder?: (o: Order) => void
 }) {
-  const israelTodayStr = getIsraelDateString()
   const activeShiftOrders = orders.filter(o => {
     if (!o.order_date) return false
     if (shiftStartTime) {
       return o.order_date > shiftStartTime
     }
-    return o.order_date.startsWith(israelTodayStr) || new Date(o.order_date).toDateString() === new Date().toDateString()
+    return !o.is_settled
   })
   const shiftOrdersTotal = activeShiftOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
   const todayTotalValue = metrics.totalCashToday ?? shiftOrdersTotal

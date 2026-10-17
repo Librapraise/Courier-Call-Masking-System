@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { parseDeliveryMessage } from '@/lib/crm/parser'
+import { parseDeliveryMessage, getOrderPaymentInfo } from '@/lib/crm/parser'
 import { ingestParsedDelivery } from '@/lib/crm/ingestion-service'
 import { sendTelegramMessage, formatBatchReceipt } from '@/lib/crm/telegram-bot'
 import { supabaseAdmin } from '@/lib/supabase/server'
@@ -115,10 +115,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Calculate total courier cash collected in active shift (since last Z-report / day closeout)
+    // 4. Calculate total courier cash collected in active shift (resets ONLY on Z-Report / day closeout)
     let totalCashToday = totalBatchCash
     try {
-      // Find latest day closeout to determine the active shift start boundary
+      // Find latest day closeout to determine the active shift start boundary (no midnight/36h expiration!)
       const { data: latestCloseout } = await supabaseAdmin
         .from('crm_day_closeouts')
         .select('shift_end, created_at')
@@ -126,27 +126,27 @@ export async function POST(req: NextRequest) {
         .limit(1)
         .maybeSingle()
 
-      const isRecentCloseout = latestCloseout && (Date.now() - new Date(latestCloseout.created_at).getTime() < 36 * 3600 * 1000)
-      const shiftStartIso = isRecentCloseout
+      const shiftStartIso = latestCloseout
         ? (latestCloseout.shift_end || latestCloseout.created_at)
         : null
 
       let query = supabaseAdmin
         .from('crm_orders')
-        .select('total_price, is_settled')
+        .select('total_price, payment_method, is_prepaid, is_settled, order_date')
+        .eq('is_settled', false)
 
       if (shiftStartIso) {
         query = query.gt('order_date', shiftStartIso)
-      } else {
-        const israelMidnightIso = getIsraelMidnightIso()
-        query = query.gte('order_date', israelMidnightIso)
       }
 
-      // Only count unsettled orders currently in couriers' hands
-      const { data: activeOrders } = await query.eq('is_settled', false)
+      // Only count unsettled physical cash orders currently in couriers' hands
+      const { data: activeOrders } = await query
 
       if (activeOrders && activeOrders.length > 0) {
-        totalCashToday = activeOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
+        totalCashToday = activeOrders.reduce((sum, o) => {
+          const payInfo = getOrderPaymentInfo(o)
+          return sum + (payInfo.isPrepaid ? 0 : payInfo.cashToCollect)
+        }, 0)
       } else {
         totalCashToday = totalBatchCash
       }
