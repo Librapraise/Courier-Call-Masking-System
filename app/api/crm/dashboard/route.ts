@@ -561,6 +561,9 @@ export async function POST(req: Request) {
           actual_items,
           total_price,
           courier_id,
+          payment_method,
+          is_prepaid,
+          raw_message,
           crm_customers (
             id,
             address_name,
@@ -642,7 +645,7 @@ export async function POST(req: Request) {
             const payInfo = getOrderPaymentInfo(updatedOrder)
             const payIcon = payInfo.paymentMethod === 'CRYPTO' ? '🪙' : payInfo.paymentMethod === 'BIT' ? '📱' : '💳'
             const priceDisplay = payInfo.isPrepaid
-              ? `${payInfo.labelHe} (0₪ מזומן) ${payIcon}`
+              ? `0₪ מזומן (${payInfo.labelHe} ${payIcon})`
               : `₪${Number(updatedOrder.total_price || 0).toLocaleString()} מזומן`
 
             const prepaidWarning = payInfo.isPrepaid
@@ -1988,6 +1991,7 @@ export async function POST(req: Request) {
           id, customer_id, brand_id, courier_id, address, city,
           menu_items, actual_items, total_price, is_settled,
           raw_message, order_date, created_at,
+          payment_method, is_prepaid,
           brands(id, name),
           crm_couriers(id, name, phone_number, telegram_id),
           crm_customers(id, address_name, phone_number, telegram_handle, customer_type)
@@ -2031,7 +2035,7 @@ export async function POST(req: Request) {
             const payInfo = getOrderPaymentInfo(updatedOrder)
             const payIcon = payInfo.paymentMethod === 'CRYPTO' ? '🪙' : payInfo.paymentMethod === 'BIT' ? '📱' : '💳'
             const priceDisplay = payInfo.isPrepaid
-              ? `${payInfo.labelHe} (0₪ מזומן) ${payIcon}`
+              ? `0₪ מזומן (${payInfo.labelHe} ${payIcon})`
               : `₪${Number(updatedOrder.total_price || 0).toLocaleString()} מזומן`
             const prepaidWarning = payInfo.isPrepaid
               ? `\n${payIcon} *סטטוס תשלום:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
@@ -2063,7 +2067,7 @@ export async function POST(req: Request) {
               const payInfo = getOrderPaymentInfo(updatedOrder)
               const payIcon = payInfo.paymentMethod === 'CRYPTO' ? '🪙' : payInfo.paymentMethod === 'BIT' ? '📱' : '💳'
               const priceDisplay = payInfo.isPrepaid
-                ? `${payInfo.labelHe} (0₪ מזומן) ${payIcon}`
+                ? `0₪ מזומן (${payInfo.labelHe} ${payIcon})`
                 : `₪${newPriceNum.toLocaleString()} מזומן`
               const prepaidWarning = payInfo.isPrepaid
                 ? `\n${payIcon} *הנחיה לשליח:* ${payInfo.labelHe} — *אין לגבות מזומן מהלקוח!*`
