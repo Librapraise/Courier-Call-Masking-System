@@ -1959,26 +1959,6 @@ export default function GhostCrmDashboard() {
                   </div>
                 )}
 
-                {/* Total Business Net Profit Summary Banner */}
-                <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-500/10 via-indigo-500/10 to-transparent border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">🏦</span>
-                    <div>
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                        {isRtl ? 'סה״כ רווח נקי כולל לעסק' : 'Total Business Net Profit'}
-                      </span>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                        {isRtl
-                          ? `₪${dayCloseoutPreview.netToSafe.toLocaleString()} מעטפות שליחים${(dayCloseoutPreview.totalAtmCash || 0) > 0 ? ` + ₪${(dayCloseoutPreview.totalAtmCash || 0).toLocaleString()} מחסנאי` : ''} + ₪${dayCloseoutPreview.totalBitCredit.toLocaleString()} שמורים בספק אשראי`
-                          : `₪${dayCloseoutPreview.netToSafe.toLocaleString()} courier cash${(dayCloseoutPreview.totalAtmCash || 0) > 0 ? ` + ₪${(dayCloseoutPreview.totalAtmCash || 0).toLocaleString()} warehouseman` : ''} + ₪${dayCloseoutPreview.totalBitCredit.toLocaleString()} held with credit provider`}
-                      </p>
-                    </div>
-                  </div>
-                  <span className="text-lg sm:text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 shrink-0">
-                    ₪{dayCloseoutPreview.totalBusinessNet.toLocaleString()}
-                  </span>
-                </div>
-
                 {/* Courier Breakdown Table */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -2035,6 +2015,26 @@ export default function GhostCrmDashboard() {
                       </tbody>
                     </table>
                   </div>
+                </div>
+
+                {/* Total Business Net Profit Summary Banner */}
+                <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-500/10 via-indigo-500/10 to-transparent border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🏦</span>
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        {isRtl ? 'סה״כ רווח נקי כולל לעסק' : 'Total Business Net Profit'}
+                      </span>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        {isRtl
+                          ? `₪${dayCloseoutPreview.netToSafe.toLocaleString()} מעטפות שליחים${(dayCloseoutPreview.totalAtmCash || 0) > 0 ? ` + ₪${(dayCloseoutPreview.totalAtmCash || 0).toLocaleString()} מחסנאי` : ''} + ₪${dayCloseoutPreview.totalBitCredit.toLocaleString()} שמורים בספק אשראי`
+                          : `₪${dayCloseoutPreview.netToSafe.toLocaleString()} courier cash${(dayCloseoutPreview.totalAtmCash || 0) > 0 ? ` + ₪${(dayCloseoutPreview.totalAtmCash || 0).toLocaleString()} warehouseman` : ''} + ₪${dayCloseoutPreview.totalBitCredit.toLocaleString()} held with credit provider`}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-lg sm:text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 shrink-0">
+                    ₪{dayCloseoutPreview.totalBusinessNet.toLocaleString()}
+                  </span>
                 </div>
 
                 {/* Optional Notes */}

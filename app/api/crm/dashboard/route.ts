@@ -1515,6 +1515,9 @@ export async function POST(req: Request) {
         (totalAtmCodeCash > 0 ? `  ▫️ מזומן שנמשך בקוד כספומט (אצל מחסנאי): *₪${totalAtmCodeCash.toLocaleString()}*\n` : '') +
         `  ▫️ שולם מראש בביט / אשראי: *₪${totalBitCredit.toLocaleString()}*\n` +
         `▫️ סך עמלות שליחים ששולמו: *₪${totalCourierPay.toLocaleString()}*\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `📋 *פירוט מעטפות מזומן לגבייה מכל שליח:*\n\n` +
+        `${courierWarehouseCards}\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
         `💵 *סך נטו מזומן ממעטפות שליחים:*\n` +
         `💰 *₪${totalNetToSafe.toLocaleString()}*\n` +
@@ -1533,9 +1536,6 @@ export async function POST(req: Request) {
         `🏦 *סה״כ רווח נקי כולל לעסק:*\n` +
         `💎 *₪${totalOverallBusinessProfit.toLocaleString()}*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `📋 *פירוט מעטפות מזומן לגבייה מכל שליח:*\n\n` +
-        `${courierWarehouseCards}\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
         (notes && notes.trim() ? `📝 *הערות מנהל משמרת:*\n${notes.trim()}\n\n━━━━━━━━━━━━━━━━━━━━━\n` : '') +
         `🔒 *חובה על המחסנאי לוודא קבלת כל המעטפות במזומן והפקדת כל הכספים (כולל משיכות כספומט) בכספת.*`
 
@@ -1551,6 +1551,9 @@ export async function POST(req: Request) {
         (totalAtmCodeCash > 0 ? `  ▫️ תקבולים בקוד משיכה (מחסנאי): *₪${totalAtmCodeCash.toLocaleString()}*\n` : '') +
         `  ▫️ תקבולים בסליקה / ביט: *₪${totalBitCredit.toLocaleString()}*\n` +
         `▫️ הוצאות עמלות שליחים: *₪${totalCourierPay.toLocaleString()}*\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `👥 *פירוט הכנסות ועמלות לפי שליח:*\n\n` +
+        `${courierAccountantCards}\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
         `💵 *נטו מזומן ממעטפות שליחים:*\n` +
         `💰 *₪${totalNetToSafe.toLocaleString()}*\n` +
@@ -1568,9 +1571,6 @@ export async function POST(req: Request) {
         `━━━━━━━━━━━━━━━━━━━━━\n` +
         `🏦 *סה״כ רווח נקי כולל לעסק:*\n` +
         `💎 *₪${totalOverallBusinessProfit.toLocaleString()}*\n` +
-        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `👥 *פירוט הכנסות ועמלות לפי שליח:*\n\n` +
-        `${courierAccountantCards}\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
         (notes && notes.trim() ? `📝 *הערות מנהל:*\n${notes.trim()}\n\n━━━━━━━━━━━━━━━━━━━━━\n` : '') +
         `✅ *סטטוס משמרת:* סגירת יום הושלמה בהצלחה. הקופה אופסה ליום חדש.`
