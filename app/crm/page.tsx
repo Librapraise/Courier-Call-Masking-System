@@ -62,7 +62,8 @@ import {
   CourierModal,
   CourierDeleteModal,
   OrderDraftModal,
-  OrderDeleteModal
+  OrderDeleteModal,
+  BatchDepletionModal
 } from '@/components/crm/CrmCrudModals'
 
 interface Customer {
@@ -134,6 +135,7 @@ interface Product {
   stock_on_hand: number
   unit: string
   min_stock_alert: number
+  cost_per_unit?: number
   aliases?: string[]
 }
 
@@ -242,6 +244,7 @@ export default function GhostCrmDashboard() {
   const [grossInput, setGrossInput] = useState<string>('')
   const [bonusInput, setBonusInput] = useState<string>('0')
   const [batYamCountInput, setBatYamCountInput] = useState<number>(0)
+  const lastSettlingCourierIdRef = React.useRef<string | null>(null)
   const [settlementNotes, setSettlementNotes] = useState<string>('')
   const [isSubmittingSettle, setIsSubmittingSettle] = useState(false)
   const [isPurgingDemo, setIsPurgingDemo] = useState(false)
@@ -253,6 +256,7 @@ export default function GhostCrmDashboard() {
   const [showProductModal, setShowProductModal] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [deletingProduct, setDeletingProduct] = useState<Product | null>(null)
+  const [showBatchDepletionModal, setShowBatchDepletionModal] = useState(false)
 
   const [showBrandManagerModal, setShowBrandManagerModal] = useState(false)
 
@@ -666,24 +670,29 @@ export default function GhostCrmDashboard() {
     )
   }
 
-  // When opening courier settlement modal, auto-detect Bat Yam deliveries in their active unsettled batch
+  // When opening courier settlement modal, auto-detect Bat Yam deliveries ONLY ONCE on modal open
   useEffect(() => {
     if (!settlingCourier) {
+      lastSettlingCourierIdRef.current = null
       setBatYamCountInput(0)
       return
     }
 
-    const courierOrders = orders.filter(o => {
-      const cId = (o as any).crm_couriers?.id || (o as any).courier_id
-      if (cId !== settlingCourier.id) return false
-      if (o.is_settled) return false
-      if (shiftStartTime && o.order_date <= shiftStartTime) return false
-      return true
-    })
+    // Only auto-detect if opening a new courier's settlement modal so background polling never resets manual adjustments
+    if (lastSettlingCourierIdRef.current !== settlingCourier.id) {
+      lastSettlingCourierIdRef.current = settlingCourier.id
+      const courierOrders = orders.filter(o => {
+        const cId = (o as any).crm_couriers?.id || (o as any).courier_id
+        if (cId !== settlingCourier.id) return false
+        if (o.is_settled) return false
+        if (shiftStartTime && o.order_date <= shiftStartTime) return false
+        return true
+      })
 
-    const detectedBatYam = courierOrders.filter(isBatYamOrder).length
-    setBatYamCountInput(detectedBatYam)
-  }, [settlingCourier, orders, shiftStartTime])
+      const detectedBatYam = courierOrders.filter(isBatYamOrder).length
+      setBatYamCountInput(detectedBatYam)
+    }
+  }, [settlingCourier])
 
   // Phone Masking
   const maskPhoneNumber = (phone: string, isUnmasked: boolean) => {
@@ -1308,6 +1317,16 @@ export default function GhostCrmDashboard() {
         isRtl={isRtl}
       />
 
+      <BatchDepletionModal
+        isOpen={showBatchDepletionModal}
+        onClose={() => setShowBatchDepletionModal(false)}
+        onSuccess={(msg) => {
+          setNotification(msg)
+          fetchData(true)
+        }}
+        isRtl={isRtl}
+      />
+
       <BrandManagerModal
         isOpen={showBrandManagerModal}
         onClose={() => setShowBrandManagerModal(false)}
@@ -1585,38 +1604,42 @@ export default function GhostCrmDashboard() {
                 </div>
 
                 {/* Bat Yam Adjustment Stepper */}
-                <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-800/60 flex items-center justify-between gap-3">
+                <div className="p-3.5 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/90 dark:border-amber-800/70 flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs">🌊</span>
-                      <span className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                        {isRtl ? 'משלוחי בת ים (₪50 למשלוח)' : 'Bat Yam Deliveries (₪50 each)'}
+                      <span className="text-xs font-bold text-amber-950 dark:text-amber-200">
+                        {isRtl ? 'משלוחי בת ים (עמלה ₪50 למשלוח)' : 'Bat Yam Deliveries (₪50 courier fee)'}
                       </span>
                     </div>
-                    <p className="text-[10px] text-amber-700 dark:text-amber-300/80 mt-0.5 truncate">
+                    <p className="text-[10px] text-amber-800 dark:text-amber-300/90 mt-0.5 truncate font-medium">
                       {safeBatYamCount > 0
-                        ? (isRtl ? `${safeBatYamCount} בת ים (₪50) + ${safeStandardCount} רגיל (₪100)` : `${safeBatYamCount} Bat Yam (₪50) + ${safeStandardCount} Standard (₪100)`)
-                        : (isRtl ? `ללא משלוחי בת ים (כל ${settleOrderCount} המשלוחים לפי ₪100)` : `No Bat Yam deliveries (all ${settleOrderCount} at ₪100)`)}
+                        ? (isRtl 
+                            ? `${safeBatYamCount} בת ים (₪50) + ${safeStandardCount} רגיל (₪100) • מוסיף ₪${safeBatYamCount * 50} לנטו למחסנאי` 
+                            : `${safeBatYamCount} Bat Yam (₪50) + ${safeStandardCount} Standard (₪100) • Adds ₪${safeBatYamCount * 50} to net`)
+                        : (isRtl 
+                            ? `ללא בת ים (כל ${settleOrderCount} המשלוחים לפי ₪100)` 
+                            : `No Bat Yam (all ${settleOrderCount} at ₪100)`)}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0 bg-white dark:bg-slate-900 rounded-lg p-1 border border-amber-200 dark:border-amber-800">
+                  <div className="flex items-center gap-1.5 shrink-0 bg-white dark:bg-slate-900 rounded-xl p-1 border border-amber-300 dark:border-amber-700 shadow-xs" dir="ltr">
                     <button
                       type="button"
                       disabled={safeBatYamCount <= 0}
                       onClick={() => setBatYamCountInput(prev => Math.max(0, prev - 1))}
-                      className="w-7 h-7 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-base flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
+                      className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-lg flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer active:scale-95"
                       title={isRtl ? 'הפחת משלוח בת ים (-1)' : 'Decrease Bat Yam (-1)'}
                     >
                       -
                     </button>
-                    <span className="w-7 text-center font-mono font-black text-sm text-amber-900 dark:text-amber-200">
+                    <span className="w-8 text-center font-mono font-black text-base text-amber-900 dark:text-amber-200 select-none">
                       {safeBatYamCount}
                     </span>
                     <button
                       type="button"
-                      disabled={safeBatYamCount >= settleOrderCount}
-                      onClick={() => setBatYamCountInput(prev => Math.min(settleOrderCount, prev + 1))}
-                      className="w-7 h-7 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-base flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
+                      disabled={safeBatYamCount >= Math.max(settleOrderCount, 1)}
+                      onClick={() => setBatYamCountInput(prev => Math.min(Math.max(settleOrderCount, 1), prev + 1))}
+                      className="w-8 h-8 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-lg flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer active:scale-95 shadow-xs"
                       title={isRtl ? 'הוסף משלוח בת ים (+1)' : 'Increase Bat Yam (+1)'}
                     >
                       +
@@ -3142,6 +3165,7 @@ export default function GhostCrmDashboard() {
               setShowProductModal(true)
             }}
             onOpenDeleteProduct={(p) => setDeletingProduct(p)}
+            onOpenBatchDepletion={() => setShowBatchDepletionModal(true)}
           />
         )}
 

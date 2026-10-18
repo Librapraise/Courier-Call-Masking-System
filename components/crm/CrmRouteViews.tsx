@@ -95,6 +95,7 @@ export interface Product {
   stock_on_hand: number
   unit: string
   min_stock_alert: number
+  cost_per_unit?: number
   aliases?: string[]
 }
 
@@ -1057,7 +1058,8 @@ export function InventoryRouteView({
   setAdjustQty,
   onOpenAddProduct,
   onOpenEditProduct,
-  onOpenDeleteProduct
+  onOpenDeleteProduct,
+  onOpenBatchDepletion
 }: {
   products: Product[]
   filteredProducts: Product[]
@@ -1074,11 +1076,12 @@ export function InventoryRouteView({
   onOpenAddProduct?: () => void
   onOpenEditProduct?: (p: Product) => void
   onOpenDeleteProduct?: (p: Product) => void
+  onOpenBatchDepletion?: () => void
 }) {
   return (
     <div className="space-y-6">
       {/* Inventory KPI Summary Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
         <div className="bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
           <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total SKUs</span>
           <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">{products.length}</p>
@@ -1105,6 +1108,19 @@ export function InventoryRouteView({
               .toLocaleString()}g
           </p>
           <p className="text-[10px] text-slate-400 dark:text-slate-500">Total live grams in stock</p>
+        </div>
+        <div className="bg-white dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs col-span-2 sm:col-span-1">
+          <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+            {isRtl ? 'שווי מלאי במחסן' : 'Warehouse Value'}
+          </span>
+          <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
+            ₪{products
+              .reduce((sum, p) => sum + (Number(p.stock_on_hand) || 0) * (Number(p.cost_per_unit) || 0), 0)
+              .toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          </p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500">
+            {isRtl ? 'שווי עלות מוצרים כולל' : 'Valuation at cost'}
+          </p>
         </div>
       </div>
 
@@ -1168,16 +1184,30 @@ export function InventoryRouteView({
             </button>
           </div>
 
-          {onOpenAddProduct && (
-            <button
-              type="button"
-              onClick={onOpenAddProduct}
-              className="px-3.5 py-1.5 rounded-xl bg-[#4352E8] hover:bg-[#3442cb] text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
-            >
-              <PlusIcon className="w-4 h-4" />
-              <span>Add Product</span>
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {onOpenBatchDepletion && (
+              <button
+                type="button"
+                onClick={onOpenBatchDepletion}
+                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 via-rose-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white text-xs font-bold transition shadow-md flex items-center gap-1.5 cursor-pointer shrink-0"
+                title={isRtl ? 'הדבק רשימת מוצרים לפריקה מהמלאי והפקת דוח כספי' : 'Paste end-of-day depletion message to update stock and generate COGS report'}
+              >
+                <span>⚡</span>
+                <span>{isRtl ? 'פריקת מלאי יומית' : 'End-of-Day Depletion'}</span>
+              </button>
+            )}
+
+            {onOpenAddProduct && (
+              <button
+                type="button"
+                onClick={onOpenAddProduct}
+                className="px-3.5 py-1.5 rounded-xl bg-[#4352E8] hover:bg-[#3442cb] text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+              >
+                <PlusIcon className="w-4 h-4" />
+                <span>Add Product</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1191,6 +1221,8 @@ export function InventoryRouteView({
                 <th className="py-3.5 px-3">{t.category}</th>
                 <th className="py-3.5 px-3">{t.stockOnHand}</th>
                 <th className="py-3.5 px-3">{t.unit}</th>
+                <th className="py-3.5 px-3">{isRtl ? 'עלות ליח׳ / גרם' : 'Cost / Unit'}</th>
+                <th className="py-3.5 px-3">{isRtl ? 'שווי במלאי' : 'Total Value'}</th>
                 <th className="py-3.5 px-3">{t.minStock}</th>
                 <th className="py-3.5 px-3">{t.status}</th>
                 <th className="py-3.5 px-4 text-center">Actions / פעולות</th>
@@ -1199,6 +1231,7 @@ export function InventoryRouteView({
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-xs">
               {filteredProducts.map(prod => {
                 const stock = Number(prod.stock_on_hand) || 0
+                const cost = Number(prod.cost_per_unit) || 0
                 const minAlert = Number(prod.min_stock_alert) || 10
                 const isLow = stock <= minAlert && stock > 0
                 const isOut = stock <= 0
@@ -1233,6 +1266,12 @@ export function InventoryRouteView({
                     </td>
                     <td className="py-3.5 px-3 text-slate-500 dark:text-slate-400 font-semibold">
                       {prod.unit === 'g' ? t.grams : t.units}
+                    </td>
+                    <td className="py-3.5 px-3 font-mono text-slate-700 dark:text-slate-300 font-semibold">
+                      {cost > 0 ? `₪${cost.toFixed(2)}` : <span className="text-slate-400">0.00 ₪</span>}
+                    </td>
+                    <td className="py-3.5 px-3 font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                      ₪{(stock * cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td className="py-3.5 px-3 text-slate-400 dark:text-slate-500 font-mono">
                       {minAlert} {prod.unit === 'g' ? t.grams : t.units}

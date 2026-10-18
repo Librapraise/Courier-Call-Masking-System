@@ -1,5 +1,5 @@
 import { extractCityFromAddress } from './israeli-cities'
-import { matchBrand, matchWarehouseProduct, MatchedWarehouseProduct } from './fuzzy-matcher'
+import { matchBrand, matchWarehouseProduct, MatchedWarehouseProduct, normalizeHebrewText } from './fuzzy-matcher'
 
 export interface ParsedItemDeduction {
   menuName: string
@@ -484,12 +484,25 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
           matchedProductCategory: matchedProd.product.category
         })
       } else {
-        // Fallback deduction if name doesn't match catalog
+        // Fallback deduction if name doesn't match catalog: cleanly parse quantity & unit
+        const qtyRegex = /(?:^|\s)(\d+(?:\.\d+)?)\s*(?:גרם|ג['׳]|g|יח['׳]|יחידות)?/i
+        const qMatch = warehousePart.match(qtyRegex)
+        let extractedQty = qMatch ? parseFloat(qMatch[1]) : 1.0
+        let extractedUnit = 'g'
+        if (qMatch && /(?:יח|יחידות)/i.test(qMatch[0])) {
+          extractedUnit = 'units'
+        }
+        let cleanedWarehouseName = warehousePart
+          .replace(qtyRegex, ' ')
+          .replace(/(?:מתנה|כולל משלוח|בוטיק|פרימיום|לפנק)/g, ' ')
+          .trim()
+        if (!cleanedWarehouseName) cleanedWarehouseName = warehousePart.trim()
+
         deductions.push({
           menuName: menuPart,
-          warehouseProductName: warehousePart,
-          quantity: 1,
-          unit: 'g'
+          warehouseProductName: cleanedWarehouseName,
+          quantity: extractedQty,
+          unit: extractedUnit
         })
       }
     } else {
@@ -497,6 +510,7 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
       const isPayLine = isPaymentLine(line)
       const isBrandLine = Boolean(matchBrand(line))
       const isVerificationLine = /(?:אימות|אושר|אישור\s*הזמנה|מאושר|בדיקה|מנהל\s+גיבוי\s+הזמנות|סדרן|הסדרן|מוקד|המוקד)/i.test(line)
+      const isPureSymbolOrEmoji = normalizeHebrewText(line).length === 0 && !/\d/.test(line)
 
       const isNotMeta = !line.match(phoneRegex) &&
         !line.match(/@([A-Za-z0-9_]+)/) &&
@@ -505,6 +519,7 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
         !isPayLine &&
         !isBrandLine &&
         !isVerificationLine &&
+        !isPureSymbolOrEmoji &&
         line !== customerName
 
       if (isNotMeta) {
@@ -532,6 +547,11 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
   // If no slash deductions and no trailing deductions, attempt to match products directly from item lines
   if (deductions.length === 0 && menuLines.length > 0) {
     for (const line of menuLines) {
+      // If customer is returning an item (e.g. "מחזיר", "החזרה"), do not deplete warehouse stock
+      const isReturn = /(?:מחזיר|החזיר|החזרה|להחזיר)/i.test(line)
+      if (isReturn) {
+        continue
+      }
       const matchedProd = matchWarehouseProduct(line)
       if (matchedProd) {
         deductions.push({

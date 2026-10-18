@@ -10,6 +10,8 @@ import { getIsraelDateString, getIsraelMidnightIso } from '@/lib/crm/date-utils'
 import { parseDeliveryMessage, getOrderPaymentInfo } from '@/lib/crm/parser'
 import { matchBrand } from '@/lib/crm/fuzzy-matcher'
 import { getCached, setCached, invalidateDashboardCache } from '@/lib/crm/cache'
+import { getLocalProductCosts, saveLocalProductCost, saveLocalProductCostsBatch } from '@/lib/crm/product-costs'
+import { parseBatchDepletionMessage, formatDepletionTelegramReport } from '@/lib/crm/depletion-parser'
 
 // In-memory staff authorization cache (60 seconds TTL)
 const staffAuthCache = new Map<string, { isStaff: boolean; expiresAt: number }>()
@@ -206,7 +208,16 @@ export async function GET() {
       ? brandsData
       : BRANDS_LIST.map((name, i) => ({ id: `brand-${i}`, name }))
 
-    const products = productsRes.data || []
+    const localCosts = getLocalProductCosts()
+    const rawProducts = productsRes.data || []
+    const products = rawProducts.map((p: any) => ({
+      ...p,
+      cost_per_unit: Number(
+        p.cost_per_unit !== undefined && p.cost_per_unit !== null
+          ? p.cost_per_unit
+          : localCosts[p.id] ?? localCosts[p.name] ?? 0
+      )
+    }))
     let couriersData = couriersRes.data || []
 
     let recentDayCloseouts: any[] = closeoutsRes.data || []
@@ -525,6 +536,103 @@ export async function POST(req: Request) {
         })
 
       return NextResponse.json({ success: true, newStock })
+    }
+
+    if (action === 'BATCH_DEPLETE_INVENTORY') {
+      const { rawMessage, customCosts } = body
+      if (!rawMessage || typeof rawMessage !== 'string' || !rawMessage.trim()) {
+        return NextResponse.json({ error: 'Missing depletion message content' }, { status: 400 })
+      }
+
+      // 1. Fetch current catalog products and local costs
+      if (customCosts && typeof customCosts === 'object') {
+        saveLocalProductCostsBatch(customCosts)
+      }
+      const activeCosts = getLocalProductCosts()
+
+      const { data: prodsData } = await supabaseAdmin
+        .from('products')
+        .select('id, name, category, unit, stock_on_hand, min_stock_alert, aliases')
+
+      const prodsList = (prodsData || []).map((p: any) => ({
+        ...p,
+        cost_per_unit: Number(activeCosts[p.id] ?? activeCosts[p.name] ?? p.cost_per_unit ?? 0)
+      }))
+
+      // 2. Fetch today's orders to compute revenue per product
+      const { data: latestCloseout } = await supabaseAdmin
+        .from('crm_day_closeouts')
+        .select('shift_end, created_at')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      const shiftStartIso = latestCloseout
+        ? (latestCloseout.shift_end || latestCloseout.created_at)
+        : null
+
+      let ordersQuery = supabaseAdmin
+        .from('crm_orders')
+        .select('id, total_price, menu_items, actual_items, order_date')
+
+      if (shiftStartIso) {
+        ordersQuery = ordersQuery.gt('order_date', shiftStartIso)
+      }
+
+      const { data: shiftOrders } = await ordersQuery
+
+      // Calculate revenue per product based on orders in this shift
+      const todaySalesMap = new Map<string, number>()
+      if (shiftOrders) {
+        for (const ord of shiftOrders) {
+          const ordText = `${ord.actual_items || ''} ${ord.menu_items || ''}`
+          const ordPrice = Number(ord.total_price) || 0
+          for (const prod of prodsList) {
+            if (
+              ordText.includes(prod.name) ||
+              (prod.aliases && prod.aliases.some((a: string) => ordText.includes(a)))
+            ) {
+              todaySalesMap.set(prod.name, (todaySalesMap.get(prod.name) || 0) + ordPrice)
+            }
+          }
+        }
+      }
+
+      // 3. Parse depletion message
+      const report = parseBatchDepletionMessage(rawMessage, prodsList, todaySalesMap)
+
+      // 4. Execute stock deductions in parallel
+      const updatePromises = report.items.map(async (item) => {
+        if (!item.matchedProductId) return
+        await Promise.all([
+          supabaseAdmin
+            .from('products')
+            .update({
+              stock_on_hand: item.newStock,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', item.matchedProductId),
+          supabaseAdmin
+            .from('inventory_transactions')
+            .insert({
+              product_id: item.matchedProductId,
+              quantity: -Math.abs(item.quantity),
+              reason: 'END_OF_DAY_DEPLETION',
+              notes: `End of day batch depletion: ${item.quantity}${item.unit} (${item.costPerUnit > 0 ? `₪${item.costPerUnit}/u` : 'no cost set'})`
+            })
+        ])
+      })
+
+      await Promise.all(updatePromises)
+
+      // 5. Invalidate cache
+      invalidateDashboardCache()
+
+      return NextResponse.json({
+        success: true,
+        report,
+        telegramFormatted: formatDepletionTelegramReport(report)
+      })
     }
 
     if (action === 'ASSIGN_ORDER_COURIER') {
@@ -1577,34 +1685,51 @@ export async function POST(req: Request) {
     // 1. PRODUCTS CRUD HANDLERS (WAREHOUSE CATALOG 29/9)
     // ========================================================
     if (action === 'CREATE_PRODUCT') {
-      const { name, category, unit, stock_on_hand, min_stock_alert, aliases } = body
+      const { name, category, unit, stock_on_hand, min_stock_alert, cost_per_unit, aliases } = body
       if (!name || typeof name !== 'string' || !name.trim()) {
         return NextResponse.json({ error: 'Product name is required.' }, { status: 400 })
       }
 
       const initialStock = Number(stock_on_hand) || 0
+      const costPerUnitNum = Number(cost_per_unit) || 0
       const aliasArray = Array.isArray(aliases)
         ? aliases.map((a: string) => a.trim()).filter(Boolean)
         : typeof aliases === 'string'
         ? aliases.split(',').map((a: string) => a.trim()).filter(Boolean)
         : []
 
-      const { data: newProd, error: prodErr } = await supabaseAdmin
+      const insertPayload: Record<string, any> = {
+        name: name.trim(),
+        category: (category || 'תפרחת').trim(),
+        unit: unit === 'units' ? 'units' : 'g',
+        stock_on_hand: initialStock,
+        min_stock_alert: Number(min_stock_alert) || 10,
+        aliases: aliasArray
+      }
+
+      let newProd: any = null
+      const { data: createdWithCost, error: costErr } = await supabaseAdmin
         .from('products')
-        .insert({
-          name: name.trim(),
-          category: (category || 'תפרחת').trim(),
-          unit: unit === 'units' ? 'units' : 'g',
-          stock_on_hand: initialStock,
-          min_stock_alert: Number(min_stock_alert) || 10,
-          aliases: aliasArray
-        })
+        .insert({ ...insertPayload, cost_per_unit: costPerUnitNum })
         .select()
         .single()
 
-      if (prodErr) {
-        return NextResponse.json({ error: prodErr.message }, { status: 400 })
+      if (costErr) {
+        const { data: createdBase, error: baseErr } = await supabaseAdmin
+          .from('products')
+          .insert(insertPayload)
+          .select()
+          .single()
+        if (baseErr) {
+          return NextResponse.json({ error: baseErr.message }, { status: 400 })
+        }
+        newProd = createdBase
+      } else {
+        newProd = createdWithCost
       }
+
+      saveLocalProductCost(newProd.id, costPerUnitNum)
+      saveLocalProductCost(newProd.name, costPerUnitNum)
 
       if (initialStock > 0) {
         await supabaseAdmin.from('inventory_transactions').insert({
@@ -1615,13 +1740,22 @@ export async function POST(req: Request) {
         })
       }
 
-      return NextResponse.json({ success: true, product: newProd })
+      return NextResponse.json({
+        success: true,
+        product: { ...newProd, cost_per_unit: costPerUnitNum }
+      })
     }
 
     if (action === 'UPDATE_PRODUCT') {
-      const { productId, name, category, unit, min_stock_alert, aliases } = body
+      const { productId, name, category, unit, min_stock_alert, cost_per_unit, aliases } = body
       if (!productId) {
         return NextResponse.json({ error: 'Missing productId' }, { status: 400 })
+      }
+
+      const costPerUnitNum = cost_per_unit !== undefined ? Number(cost_per_unit) || 0 : undefined
+      if (costPerUnitNum !== undefined) {
+        saveLocalProductCost(productId, costPerUnitNum)
+        if (name) saveLocalProductCost(name.trim(), costPerUnitNum)
       }
 
       const aliasArray = Array.isArray(aliases)
@@ -1638,8 +1772,10 @@ export async function POST(req: Request) {
       if (unit && (unit === 'g' || unit === 'units')) updatePayload.unit = unit
       if (min_stock_alert !== undefined) updatePayload.min_stock_alert = Number(min_stock_alert) || 10
       if (aliases !== undefined) updatePayload.aliases = aliasArray
+      if (costPerUnitNum !== undefined) updatePayload.cost_per_unit = costPerUnitNum
 
-      const { data: updatedProd, error: updateErr } = await supabaseAdmin
+      let updatedProd: any = null
+      const { data: updatedWithCost, error: updateErr } = await supabaseAdmin
         .from('products')
         .update(updatePayload)
         .eq('id', productId)
@@ -1647,10 +1783,32 @@ export async function POST(req: Request) {
         .single()
 
       if (updateErr) {
-        return NextResponse.json({ error: updateErr.message }, { status: 400 })
+        const { cost_per_unit: _, ...fallbackPayload } = updatePayload
+        const { data: fallbackUpdated, error: fallbackErr } = await supabaseAdmin
+          .from('products')
+          .update(fallbackPayload)
+          .eq('id', productId)
+          .select()
+          .single()
+
+        if (fallbackErr) {
+          return NextResponse.json({ error: fallbackErr.message }, { status: 400 })
+        }
+        updatedProd = fallbackUpdated
+      } else {
+        updatedProd = updatedWithCost
       }
 
-      return NextResponse.json({ success: true, product: updatedProd })
+      const localCosts = getLocalProductCosts()
+      const finalCost =
+        costPerUnitNum !== undefined
+          ? costPerUnitNum
+          : localCosts[productId] ?? localCosts[updatedProd?.name] ?? 0
+
+      return NextResponse.json({
+        success: true,
+        product: { ...updatedProd, cost_per_unit: finalCost }
+      })
     }
 
     if (action === 'DELETE_PRODUCT') {

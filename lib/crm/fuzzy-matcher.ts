@@ -72,7 +72,59 @@ export function matchBrand(rawText: string): string | null {
     }
   }
 
-  // 2. Fuzzy match with Levenshtein distance <= 3
+  // 2. Token sequence and phrase matching (handles trailing notes like "מלך התפזורת לשים בסיכום אליהו")
+  const inputTokens = cleaned.split(' ').filter(Boolean)
+  const inputTokensNoHe = cleanedNoHe.split(' ').filter(Boolean)
+
+  for (const brand of BRANDS_LIST) {
+    const brandTokens = normalizeHebrewText(brand).split(' ').filter(Boolean)
+    const brandTokensNoHe = brandTokens.map(stripHePrefix)
+
+    if (brandTokens.length >= 2) {
+      // Check if input contains the consecutive brand tokens
+      for (let start = 0; start <= inputTokens.length - brandTokens.length; start++) {
+        let allMatched = true
+        for (let b = 0; b < brandTokens.length; b++) {
+          const inTok = inputTokens[start + b]
+          const inTokNoHe = inputTokensNoHe[start + b] || inTok
+          const bTok = brandTokens[b]
+          const bTokNoHe = brandTokensNoHe[b]
+
+          const matchWord =
+            inTok === bTok ||
+            inTokNoHe === bTokNoHe ||
+            levenshteinDistance(inTok, bTok) <= 1 ||
+            levenshteinDistance(inTokNoHe, bTokNoHe) <= 1
+
+          if (!matchWord) {
+            allMatched = false
+            break
+          }
+        }
+        if (allMatched) {
+          return brand
+        }
+      }
+    } else if (brandTokens.length === 1 && brandTokens[0].length >= 4) {
+      // Single word brand e.g. "קוקיס", "המשגיחים"
+      const bTok = brandTokens[0]
+      const bTokNoHe = brandTokensNoHe[0]
+      for (let i = 0; i < inputTokens.length; i++) {
+        const inTok = inputTokens[i]
+        const inTokNoHe = inputTokensNoHe[i] || inTok
+        if (
+          inTok === bTok ||
+          inTokNoHe === bTokNoHe ||
+          (inTok.length >= 4 && levenshteinDistance(inTok, bTok) <= 1) ||
+          (inTokNoHe.length >= 4 && levenshteinDistance(inTokNoHe, bTokNoHe) <= 1)
+        ) {
+          return brand
+        }
+      }
+    }
+  }
+
+  // 3. Fuzzy match with Levenshtein distance <= 3
   let bestMatch: string | null = null
   let minDistance = 4
 

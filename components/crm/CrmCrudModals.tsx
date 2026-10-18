@@ -14,6 +14,7 @@ import {
 } from '@/components/crm/CrmIcons'
 import { Product, Brand, Courier, Order } from '@/components/crm/CrmRouteViews'
 import { parseSingleOrderMessage, ParsedDeliveryOrder, getOrderPaymentInfo } from '@/lib/crm/parser'
+import { BatchDepletionReport } from '@/lib/crm/depletion-parser'
 
 // ========================================================
 // 1. PRODUCT CREATE / EDIT MODAL
@@ -38,6 +39,7 @@ export function ProductModal({
   const [unit, setUnit] = useState<'g' | 'units'>('g')
   const [stockOnHand, setStockOnHand] = useState('50')
   const [minStockAlert, setMinStockAlert] = useState('10')
+  const [costPerUnit, setCostPerUnit] = useState('0')
   const [aliases, setAliases] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -49,6 +51,7 @@ export function ProductModal({
       setUnit(initialProduct.unit === 'units' ? 'units' : 'g')
       setStockOnHand(initialProduct.stock_on_hand.toString())
       setMinStockAlert((initialProduct.min_stock_alert || 10).toString())
+      setCostPerUnit((initialProduct.cost_per_unit || 0).toString())
       setAliases((initialProduct.aliases || []).join(', '))
     } else {
       setName('')
@@ -56,6 +59,7 @@ export function ProductModal({
       setUnit('g')
       setStockOnHand('50')
       setMinStockAlert('10')
+      setCostPerUnit('0')
       setAliases('')
     }
     setError(null)
@@ -89,6 +93,7 @@ export function ProductModal({
           category: category.trim(),
           unit,
           stock_on_hand: parseFloat(stockOnHand) || 0,
+          cost_per_unit: parseFloat(costPerUnit) || 0,
           min_stock_alert: parseFloat(minStockAlert) || 10,
           aliases: aliasArray
         })
@@ -207,11 +212,11 @@ export function ProductModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {/* Stock On Hand */}
             <div>
               <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                {isEditing ? 'Live Stock (Audit Protected)' : 'Initial Warehouse Stock'}
+                {isEditing ? 'Live Stock' : 'Initial Stock'}
               </label>
               <input
                 type="number"
@@ -223,8 +228,27 @@ export function ProductModal({
                 className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold disabled:opacity-60"
               />
               {isEditing && (
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Use &quot;Update Stock&quot; to restock/deduct with audit log.</p>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Audit protected.</p>
               )}
+            </div>
+
+            {/* Cost Per Unit */}
+            <div>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                {isRtl ? 'מחיר עלות (₪)' : 'Cost / Unit (₪)'}
+              </label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                value={costPerUnit}
+                onChange={e => setCostPerUnit(e.target.value)}
+                placeholder="21.00"
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
+              />
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                {isRtl ? 'לדוגמה: 21 ₪ ליח׳/גרם' : 'e.g. 21 NIS'}
+              </p>
             </div>
 
             {/* Min Stock Alert Threshold */}
@@ -1587,3 +1611,392 @@ export function OrderDeleteModal({
   )
 }
 
+// ========================================================
+// 10. BATCH END-OF-DAY INVENTORY DEPLETION & FINANCIAL REPORT MODAL
+// ========================================================
+export function BatchDepletionModal({
+  isOpen,
+  onClose,
+  onSuccess,
+  isRtl
+}: {
+  isOpen: boolean
+  onClose: () => void
+  onSuccess: (msg: string) => void
+  isRtl: boolean
+}) {
+  const [text, setText] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [report, setReport] = useState<BatchDepletionReport | null>(null)
+  const [telegramFormatted, setTelegramFormatted] = useState<string | null>(null)
+  const [isCopied, setIsCopied] = useState(false)
+
+  useEffect(() => {
+    if (isOpen) {
+      setError(null)
+      setIsCopied(false)
+    } else {
+      setReport(null)
+      setTelegramFormatted(null)
+      setError(null)
+    }
+  }, [isOpen])
+
+  if (!isOpen) return null
+
+  const handleLoadSample = () => {
+    setText(`להוריד מהמלאי\n\nזלושי יבוא - 10\nפופ כתום - 10\nפופ סגול - 25\nפופ בוטיק - 10\nרפואי האני - 20\nרפואי דראג - 43\nרפואי תפוז - 13\nרפואי פינאפל - 14\nביטים בננה - 5\nגבוה - 2\nריינבו גדול- 5`)
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!text.trim()) {
+      setError(isRtl ? 'אנא הדבק או הזן הודעת פריקה מהמלאי.' : 'Please paste a depletion message.')
+      return
+    }
+
+    try {
+      setIsSubmitting(true)
+      setError(null)
+
+      const res = await fetch('/api/crm/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'BATCH_DEPLETE_INVENTORY',
+          text: text.trim()
+        })
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to process batch depletion.')
+
+      setReport(data.report)
+      setTelegramFormatted(data.telegramFormatted || null)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleCopyReport = async () => {
+    if (!telegramFormatted) return
+    try {
+      await navigator.clipboard.writeText(telegramFormatted)
+      setIsCopied(true)
+      setTimeout(() => setIsCopied(false), 2500)
+    } catch (e) {
+      console.error('Clipboard copy error:', e)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 sm:p-4 animate-in fade-in overflow-y-auto">
+      <div
+        className="w-full max-w-2xl max-h-[92vh] flex flex-col rounded-2xl bg-white dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
+        dir={isRtl ? 'rtl' : 'ltr'}
+      >
+        {/* Header */}
+        <div className="shrink-0 flex items-center justify-between border-b border-slate-100 dark:border-slate-800 p-4 sm:p-5 bg-slate-50/50 dark:bg-slate-900/40">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 via-rose-500/20 to-indigo-500/20 border border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400 font-black text-lg">
+              ⚡
+            </div>
+            <div>
+              <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>{isRtl ? 'פריקת מלאי יומית מרוכזת וחישוב עלויות' : 'Daily End-of-Day Inventory Depletion'}</span>
+              </h3>
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                {isRtl
+                  ? 'הדבק את הודעת סוף היום לגריעה מהמלאי, חישוב עלות סחורה שנמכרה (COGS) ודוח רווח'
+                  : 'Paste end-of-day message to deduct live inventory, calculate COGS & profit'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+          >
+            <XIcon className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Scrollable Content Body */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+          {error && (
+            <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-400 text-xs font-semibold flex items-center gap-2">
+              <span>⚠️</span>
+              <span>{error}</span>
+            </div>
+          )}
+
+          {!report ? (
+            /* Input / Textarea View */
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="flex items-center justify-between text-xs">
+                <label className="font-bold text-slate-700 dark:text-slate-300">
+                  {isRtl ? 'הודעת פריקה (לדוגמה מהטלגרם):' : 'Depletion Message (e.g. from Telegram):'}
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleLoadSample}
+                    className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                  >
+                    {isRtl ? 'טען רשימה לדוגמה מהיום' : 'Load sample list'}
+                  </button>
+                  {text && (
+                    <button
+                      type="button"
+                      onClick={() => setText('')}
+                      className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"
+                    >
+                      {isRtl ? 'נקה' : 'Clear'}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <textarea
+                rows={9}
+                value={text}
+                onChange={e => setText(e.target.value)}
+                placeholder={`להוריד מהמלאי\n\nזלושי יבוא - 10\nפופ כתום - 10\nפופ סגול - 25\nפופ בוטיק - 10\nרפואי האני - 20\nרפואי דראג - 43\nרפואי תפוז - 13\nרפואי פינאפל - 14\nביטים בננה - 5\nגבוה - 2\nריינבו גדול- 5`}
+                className="w-full p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono text-xs focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 leading-relaxed"
+                dir="rtl"
+              />
+
+              <div className="p-3 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 text-[11px] text-indigo-900 dark:text-indigo-300 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <span>💡</span>
+                  <span>{isRtl ? 'איך המערכת מעבדת את הפריקה?' : 'How does batch depletion work?'}</span>
+                </p>
+                <p className="text-indigo-700 dark:text-indigo-400 leading-normal">
+                  {isRtl
+                    ? 'כל שורה מפוענחת אוטומטית לפי שם המוצר והכמות. המערכת תגרע את הכמויות ממלאי המחסן החי, תחשב את סך עלות המוצרים שנמכרו לפי מחיר העלות ליחידה (COGS), תחשב את פדיון המכירות מהיום עבור כל מוצר, ותפיק דוח רווח גולמי מוכן לשליחה בטלגרם.'
+                    : 'Each line is matched to catalog products. The system deducts stock, calculates COGS based on unit costs, queries today’s sales revenue, and produces a complete gross profit breakdown.'}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+                >
+                  {isRtl ? 'ביטול' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !text.trim()}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 via-rose-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white text-xs font-bold transition shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <RefreshIcon className="w-4 h-4 animate-spin" />
+                      <span>{isRtl ? 'מעבד ופורק מהמלאי...' : 'Processing Depletion...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>⚡</span>
+                      <span>{isRtl ? 'בצע פריקה והפק דוח כספי' : 'Execute Depletion & Generate Report'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          ) : (
+            /* Results View */
+            <div className="space-y-4 animate-in fade-in">
+              {/* Top Success Banner */}
+              <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm">
+                    ✓
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-emerald-900 dark:text-emerald-300">
+                      {isRtl ? 'פריקת המלאי בוצעה בהצלחה!' : 'Batch Depletion Executed Successfully!'}
+                    </h4>
+                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                      {isRtl
+                        ? `עודכנו ${report.totalItemsCount} מוצרים במחסן (${report.totalQuantityDepleted.toLocaleString()} יחידות/גרם נגרעו)`
+                        : `Updated ${report.totalItemsCount} products (${report.totalQuantityDepleted.toLocaleString()} units/g deducted)`}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyReport}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer ${
+                    isCopied
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white border border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {isCopied ? (
+                    <>
+                      <CheckIcon className="w-3.5 h-3.5" />
+                      <span>{isRtl ? 'הועתק ללוח!' : 'Copied!'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>📋</span>
+                      <span>{isRtl ? 'העתק דוח לטלגרם' : 'Copy Telegram Report'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Financial KPI Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800 text-center">
+                  <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">
+                    {isRtl ? 'פריטים שנגרעו' : 'Total Depleted'}
+                  </span>
+                  <p className="text-lg font-black text-slate-900 dark:text-white mt-0.5">
+                    {report.totalQuantityDepleted.toLocaleString()}
+                  </p>
+                  <p className="text-[10px] text-slate-400">{report.totalItemsCount} {isRtl ? 'מוצרים' : 'products'}</p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-rose-50/50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/30 text-center">
+                  <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase">
+                    {isRtl ? 'עלות סחורה שנמכרה' : 'Total COGS'}
+                  </span>
+                  <p className="text-lg font-black text-rose-700 dark:text-rose-400 mt-0.5">
+                    ₪{report.totalCostOfGoods.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  <p className="text-[10px] text-rose-500/80">{isRtl ? 'עלות מוצרים שנפרקו' : 'Cost of depleted items'}</p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 text-center">
+                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase">
+                    {isRtl ? 'פדיון מכירות יומי' : 'Today Sales'}
+                  </span>
+                  <p className="text-lg font-black text-indigo-700 dark:text-indigo-400 mt-0.5">
+                    ₪{report.totalRevenueToday.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  <p className="text-[10px] text-indigo-500/80">{isRtl ? 'סה"כ הכנסות ממשלוחים' : 'Deliveries revenue'}</p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 text-center">
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase">
+                    {isRtl ? 'רווח גולמי מוערך' : 'Gross Profit'}
+                  </span>
+                  <p className="text-lg font-black text-emerald-700 dark:text-emerald-400 mt-0.5">
+                    ₪{report.totalGrossProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  <p className="text-[10px] text-emerald-500/80">{isRtl ? 'פדיון פחות עלות' : 'Revenue minus COGS'}</p>
+                </div>
+              </div>
+
+              {/* Items Breakdown Table */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+                <div className="overflow-x-auto max-h-64">
+                  <table className="w-full text-left border-collapse text-xs" dir={isRtl ? 'rtl' : 'ltr'}>
+                    <thead className="sticky top-0 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">
+                      <tr>
+                        <th className="py-2.5 px-3">{isRtl ? 'מוצר' : 'Product'}</th>
+                        <th className="py-2.5 px-2">{isRtl ? 'נגרע' : 'Depleted'}</th>
+                        <th className="py-2.5 px-2">{isRtl ? 'נותר במלאי' : 'Remaining'}</th>
+                        <th className="py-2.5 px-2">{isRtl ? 'עלות ליח׳' : 'Cost/Unit'}</th>
+                        <th className="py-2.5 px-2">{isRtl ? 'סה"כ עלות' : 'Total Cost'}</th>
+                        <th className="py-2.5 px-3 text-end">{isRtl ? 'מכירות היום' : 'Today Sales'}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                      {report.items.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white">
+                            <div>
+                              <span>{item.matchedProductName}</span>
+                              {item.rawLine !== item.matchedProductName && (
+                                <p className="text-[10px] text-slate-400 font-normal">{item.rawLine}</p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-2 font-mono font-bold text-rose-600 dark:text-rose-400">
+                            -{item.quantity} {item.unit}
+                          </td>
+                          <td className="py-2.5 px-2 font-mono text-slate-700 dark:text-slate-300">
+                            {item.newStock} {item.unit}
+                          </td>
+                          <td className="py-2.5 px-2 font-mono text-slate-500">
+                            ₪{item.costPerUnit.toFixed(2)}
+                          </td>
+                          <td className="py-2.5 px-2 font-mono font-semibold text-rose-700 dark:text-rose-400">
+                            ₪{item.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-bold text-emerald-600 dark:text-emerald-400 text-end">
+                            ₪{item.todayRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Unmatched Warning (if any) */}
+              {report.unmatchedItems && report.unmatchedItems.length > 0 && (
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-[11px] text-amber-800 dark:text-amber-300 space-y-1">
+                  <p className="font-bold">⚠️ {isRtl ? 'שורות שלא נמצא עבורן מוצר תואם בקטלוג:' : 'Unmatched Lines:'}</p>
+                  <ul className="list-disc pr-4 pl-4 space-y-0.5">
+                    {report.unmatchedItems.map((u, i) => (
+                      <li key={i}>
+                        <span className="font-mono">{u.rawLine}</span> ({u.extractedName} - {u.quantity})
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Bottom Action Footer */}
+              <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReport(null)
+                    setText('')
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+                >
+                  {isRtl ? 'פריקת רשימה נוספת' : 'Deplete Another List'}
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyReport}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>{isCopied ? '✓ הועתק!' : '📋 העתק דוח מפורט'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSuccess(
+                        isRtl
+                          ? `פריקת המלאי הושלמה בהצלחה! נגרעו ${report.totalQuantityDepleted} יחידות/גרם. שווי עלות: ₪${report.totalCostOfGoods.toLocaleString()}`
+                          : `Depletion complete! Depleted ${report.totalQuantityDepleted} units. COGS: ₪${report.totalCostOfGoods.toLocaleString()}`
+                      )
+                      onClose()
+                    }}
+                    className="px-5 py-2 rounded-xl bg-[#4352E8] hover:bg-[#3442cb] text-white text-xs font-bold transition shadow-md cursor-pointer"
+                  >
+                    {isRtl ? 'סיום ורענון המערכת' : 'Done & Refresh'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

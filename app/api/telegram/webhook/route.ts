@@ -4,6 +4,9 @@ import { ingestParsedDelivery } from '@/lib/crm/ingestion-service'
 import { sendTelegramMessage, formatBatchReceipt } from '@/lib/crm/telegram-bot'
 import { supabaseAdmin } from '@/lib/supabase/server'
 import { getIsraelMidnightIso } from '@/lib/crm/date-utils'
+import { getLocalProductCosts } from '@/lib/crm/product-costs'
+import { parseBatchDepletionMessage, formatDepletionTelegramReport } from '@/lib/crm/depletion-parser'
+import { invalidateDashboardCache } from '@/lib/crm/cache'
 
 // In-memory cache for dynamic admin Telegram IDs to prevent slow listUsers calls on every webhook hit
 let cachedDynamicAdminIds: Set<string> = new Set()
@@ -113,6 +116,96 @@ export async function POST(req: NextRequest) {
         })
       }
       return NextResponse.json({ ok: true, status: 'command_handled' })
+    }
+
+    // Handle End-of-Day Batch Inventory Depletion (e.g. "להוריד מהמלאי")
+    if (
+      messageText.trim().startsWith('להוריד מהמלאי') ||
+      messageText.trim().startsWith('פריקת מלאי') ||
+      messageText.trim().startsWith('סגירת מלאי')
+    ) {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN || ''
+      const activeCosts = getLocalProductCosts()
+
+      const { data: prodsData } = await supabaseAdmin
+        .from('products')
+        .select('id, name, category, unit, stock_on_hand, min_stock_alert, aliases')
+
+      const prodsList = (prodsData || []).map((p: any) => ({
+        ...p,
+        cost_per_unit: Number(activeCosts[p.id] ?? activeCosts[p.name] ?? p.cost_per_unit ?? 0)
+      }))
+
+      // Today's orders for revenue attribution
+      const shiftStartIso = await getShiftStartIso()
+      let ordersQuery = supabaseAdmin
+        .from('crm_orders')
+        .select('id, total_price, menu_items, actual_items, order_date')
+
+      if (shiftStartIso) {
+        ordersQuery = ordersQuery.gt('order_date', shiftStartIso)
+      }
+
+      const { data: shiftOrders } = await ordersQuery
+      const todaySalesMap = new Map<string, number>()
+      if (shiftOrders) {
+        for (const ord of shiftOrders) {
+          const ordText = `${ord.actual_items || ''} ${ord.menu_items || ''}`
+          const ordPrice = Number(ord.total_price) || 0
+          for (const prod of prodsList) {
+            if (
+              ordText.includes(prod.name) ||
+              (prod.aliases && prod.aliases.some((a: string) => ordText.includes(a)))
+            ) {
+              todaySalesMap.set(prod.name, (todaySalesMap.get(prod.name) || 0) + ordPrice)
+            }
+          }
+        }
+      }
+
+      const report = parseBatchDepletionMessage(messageText, prodsList, todaySalesMap)
+
+      // Execute deductions in parallel
+      const updatePromises = report.items.map(async (item) => {
+        if (!item.matchedProductId) return
+        await Promise.all([
+          supabaseAdmin
+            .from('products')
+            .update({
+              stock_on_hand: item.newStock,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', item.matchedProductId),
+          supabaseAdmin
+            .from('inventory_transactions')
+            .insert({
+              product_id: item.matchedProductId,
+              quantity: -Math.abs(item.quantity),
+              reason: 'END_OF_DAY_DEPLETION',
+              notes: `Telegram batch depletion: ${item.quantity}${item.unit} (${item.costPerUnit > 0 ? `₪${item.costPerUnit}/u` : 'no cost set'})`
+            })
+        ])
+      })
+
+      await Promise.all(updatePromises)
+      invalidateDashboardCache()
+
+      if (botToken && chatId) {
+        const reportText = formatDepletionTelegramReport(report)
+        await sendTelegramMessage(botToken, {
+          chat_id: chatId,
+          parse_mode: 'Markdown',
+          text: reportText
+        })
+      }
+
+      return NextResponse.json({
+        ok: true,
+        type: 'batch_depletion_handled',
+        depletedCount: report.items.length,
+        totalCost: report.totalCostOfGoods,
+        totalRevenue: report.totalRevenueToday
+      })
     }
 
     // 3. Process delivery message (Supports single or batch forwarded text in parallel)

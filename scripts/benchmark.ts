@@ -44,6 +44,15 @@ async function benchmark() {
   const t3 = Date.now()
   const resWarm = await ingestParsedDelivery(parsed)
   console.log(`⏱️ Warm Ingest parsed delivery: ${Date.now() - t3}ms (Success: ${resWarm.success})`)
+
+  // 5. Cleanup test benchmark orders
+  const { data: testOrders } = await supabaseAdmin.from('crm_orders').select('id').eq('address', 'דרך הרימון 47 גינתון')
+  if (testOrders && testOrders.length > 0) {
+    const ids = testOrders.map((o: any) => o.id)
+    await supabaseAdmin.from('inventory_transactions').delete().in('order_id', ids)
+    await supabaseAdmin.from('crm_orders').delete().in('id', ids)
+    console.log(`🧹 Cleaned up ${ids.length} benchmark test order records.`)
+  }
 }
 
 benchmark().catch(console.error)
