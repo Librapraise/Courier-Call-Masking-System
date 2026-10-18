@@ -32,6 +32,29 @@ async function getDynamicAdminTelegramIds(): Promise<Set<string>> {
   }
 }
 
+// In-memory cache for active shift start boundary (60 seconds TTL)
+let cachedShiftStart: { iso: string | null; expiresAt: number } | null = null
+
+async function getShiftStartIso(): Promise<string | null> {
+  const now = Date.now()
+  if (cachedShiftStart && cachedShiftStart.expiresAt > now) {
+    return cachedShiftStart.iso
+  }
+  const { data: latestCloseout } = await supabaseAdmin
+    .from('crm_day_closeouts')
+    .select('shift_end, created_at')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const iso = latestCloseout
+    ? (latestCloseout.shift_end || latestCloseout.created_at)
+    : null
+
+  cachedShiftStart = { iso, expiresAt: now + 60000 }
+  return iso
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -161,36 +184,29 @@ export async function POST(req: NextRequest) {
               `⚡ *הנחיה למחסנאי:* יש למשוך את הכסף מהכספומט ולנעול בכספת.\n` +
               `🛵 *לשליח שובצה גבייה:* *0₪* (שולם בקוד).`
 
-            for (const whId of warehouseTelegramIds) {
-              try {
-                await sendTelegramMessage(botToken, {
-                  chat_id: whId,
-                  parse_mode: 'Markdown',
-                  text: atmAlertText
-                })
-              } catch (whErr) {
+            // Send concurrent alerts to all registered warehouse managers
+            if (warehouseTelegramIds.size > 0) {
+              Promise.allSettled(
+                Array.from(warehouseTelegramIds).map(whId =>
+                  sendTelegramMessage(botToken, {
+                    chat_id: whId,
+                    parse_mode: 'Markdown',
+                    text: atmAlertText
+                  })
+                )
+              ).catch(whErr => {
                 console.warn('[TelegramWebhook] Error sending ATM code alert to warehouseman:', whErr)
-              }
+              })
             }
           }
         }
       }
     }
 
-    // 4. Calculate total courier cash collected in active shift (resets ONLY on Z-Report / day closeout)
+    // 4. Calculate total courier cash collected in active shift (cached shift boundary)
     let totalCashToday = totalBatchCash
     try {
-      // Find latest day closeout to determine the active shift start boundary (no midnight/36h expiration!)
-      const { data: latestCloseout } = await supabaseAdmin
-        .from('crm_day_closeouts')
-        .select('shift_end, created_at')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      const shiftStartIso = latestCloseout
-        ? (latestCloseout.shift_end || latestCloseout.created_at)
-        : null
+      const shiftStartIso = await getShiftStartIso()
 
       let query = supabaseAdmin
         .from('crm_orders')

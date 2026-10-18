@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../supabase/server'
 import { ParsedDeliveryOrder } from './parser'
 import { formatPhoneForStorage } from '../utils/phone'
+import { invalidateDashboardCache } from './cache'
 
 export interface IngestionResult {
   success: boolean
@@ -18,12 +19,90 @@ export interface IngestionResult {
 // In-memory brand cache to avoid redundant database queries during batch ingestion
 const brandCache = new Map<string, string>()
 
+// In-memory product metadata cache (60 seconds TTL)
+interface ProductCacheItem {
+  id: string
+  name: string
+  unit: string
+  stock_on_hand: number
+}
+let cachedProductsMap: Map<string, ProductCacheItem> | null = null
+let productsCacheExpiry = 0
+
+async function getCachedProducts(): Promise<Map<string, ProductCacheItem>> {
+  const now = Date.now()
+  if (!cachedProductsMap || now > productsCacheExpiry) {
+    const { data: prods } = await supabaseAdmin
+      .from('products')
+      .select('id, name, unit, stock_on_hand')
+
+    cachedProductsMap = new Map(
+      (prods || []).map(p => [
+        p.name,
+        {
+          id: p.id,
+          name: p.name,
+          unit: p.unit,
+          stock_on_hand: Number(p.stock_on_hand) || 0
+        }
+      ])
+    )
+    productsCacheExpiry = now + 60000 // 60s TTL
+  }
+  return cachedProductsMap
+}
+
+/**
+ * Non-blocking legacy customer sync for Twilio call-masking.
+ * Runs in background without stalling order ingestion or dispatcher confirmations.
+ */
+function syncLegacyCustomerNonBlocking(customerName: string, rawPhone: string) {
+  (async () => {
+    try {
+      const normalizedPhone = formatPhoneForStorage(rawPhone)
+      const cleanPhone = (rawPhone || '').replace(/\D/g, '')
+      const last9 = cleanPhone.slice(-9)
+
+      const { data: matchedLegacy } = await supabaseAdmin
+        .from('customers')
+        .select('id')
+        .or(`phone_number.eq.${normalizedPhone},phone_number.ilike.%${last9}`)
+        .limit(1)
+        .maybeSingle()
+
+      if (matchedLegacy) {
+        await supabaseAdmin
+          .from('customers')
+          .update({
+            name: customerName,
+            phone_number: normalizedPhone,
+            is_active: true,
+            is_completed: false
+          })
+          .eq('id', matchedLegacy.id)
+      } else {
+        await supabaseAdmin
+          .from('customers')
+          .insert({
+            name: customerName,
+            phone_number: normalizedPhone,
+            is_active: true,
+            is_completed: false
+          })
+      }
+    } catch (syncErr) {
+      console.warn('[Ingest] Legacy customer sync background note:', syncErr)
+    }
+  })().catch(() => {})
+}
+
 /**
  * Ingests a single parsed delivery into Supabase:
  * 1. Finds or creates Brand record (with in-memory cache)
- * 2. Upserts Customer by unique phone_number (Customer Name = Address)
- * 3. Creates Order record (captures menuItems vs actualItems)
- * 4. Deducts warehouse product stock and logs inventory_transactions in parallel
+ * 2. Resolves Customer ID (fast indexed lookup or insert)
+ * 3. Creates Order record & updates Customer in parallel
+ * 4. Deducts warehouse stock using cached product metadata in parallel
+ * 5. Syncs legacy Twilio customer asynchronously in background
  */
 export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise<IngestionResult> {
   try {
@@ -60,13 +139,12 @@ export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise
       }
     }
 
-    // Fallback if brand still not resolved
     if (!brandId) {
       const { data: fallbackBrand } = await supabaseAdmin.from('brands').select('id').limit(1).single()
       brandId = fallbackBrand?.id || null
     }
 
-    // 2. Upsert Customer by Phone Number (Deterministic Identity)
+    // 2. Resolve Customer ID
     const { data: existingCust } = await supabaseAdmin
       .from('crm_customers')
       .select('id, total_orders, total_spent')
@@ -74,26 +152,30 @@ export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise
       .maybeSingle()
 
     let customerId: string
+    let customerUpdatePromise: Promise<any> | null = null
 
     if (existingCust) {
       customerId = existingCust.id
       const newTotalOrders = (existingCust.total_orders || 0) + 1
       const newTotalSpent = Number(existingCust.total_spent || 0) + Number(parsed.totalPrice || 0)
 
-      await supabaseAdmin
-        .from('crm_customers')
-        .update({
-          address_name: parsed.customerName, // Update with most recent delivery address
-          city: parsed.city,
-          telegram_handle: parsed.telegramHandle || undefined,
-          customer_type: parsed.customerType,
-          total_orders: newTotalOrders,
-          total_spent: newTotalSpent,
-          last_brand_id: brandId,
-          last_order_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', customerId)
+      // Will execute concurrently with order insertion
+      customerUpdatePromise = Promise.resolve(
+        supabaseAdmin
+          .from('crm_customers')
+          .update({
+            address_name: parsed.customerName,
+            city: parsed.city,
+            telegram_handle: parsed.telegramHandle || undefined,
+            customer_type: parsed.customerType,
+            total_orders: newTotalOrders,
+            total_spent: newTotalSpent,
+            last_brand_id: brandId,
+            last_order_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', customerId)
+      )
     } else {
       const { data: newCust, error: custError } = await supabaseAdmin
         .from('crm_customers')
@@ -117,46 +199,10 @@ export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise
       customerId = newCust.id
     }
 
-    // Also sync to legacy customers table for the Twilio Call-Masking Courier App
-    try {
-      const normalizedPhone = formatPhoneForStorage(parsed.phoneNumber)
-      const cleanPhone = (parsed.phoneNumber || '').replace(/\D/g, '')
-      const last9 = cleanPhone.slice(-9)
+    // Fire legacy sync non-blocking in background
+    syncLegacyCustomerNonBlocking(parsed.customerName, parsed.phoneNumber)
 
-      // Direct indexed lookup instead of full table scan
-      const { data: matchedLegacy } = await supabaseAdmin
-        .from('customers')
-        .select('id')
-        .or(`phone_number.eq.${normalizedPhone},phone_number.ilike.%${last9}`)
-        .limit(1)
-        .maybeSingle()
-
-      if (matchedLegacy) {
-        await supabaseAdmin
-          .from('customers')
-          .update({
-            name: parsed.customerName,
-            phone_number: normalizedPhone,
-            is_active: true,
-            is_completed: false
-          })
-          .eq('id', matchedLegacy.id)
-      } else {
-        await supabaseAdmin
-          .from('customers')
-          .insert({
-            name: parsed.customerName,
-            phone_number: normalizedPhone,
-            is_active: true,
-            is_completed: false
-          })
-      }
-    } catch (syncErr) {
-      console.warn('[Ingest] Legacy customer sync note:', syncErr)
-    }
-
-    // 3. Create Order record (with graceful fallback if payment_method column not yet added)
-    let newOrder: any = null
+    // 3. Create Order record (concurrently with customer update if applicable)
     const basePayload = {
       customer_id: customerId,
       brand_id: brandId,
@@ -170,17 +216,26 @@ export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise
       order_date: new Date().toISOString()
     }
 
-    const { data: orderWithPay, error: orderPayErr } = await supabaseAdmin
-      .from('crm_orders')
-      .insert({
-        ...basePayload,
-        payment_method: parsed.paymentMethod,
-        is_prepaid: parsed.isPrepaid
-      })
-      .select('id')
-      .single()
+    const orderInsertPromise = Promise.resolve(
+      supabaseAdmin
+        .from('crm_orders')
+        .insert({
+          ...basePayload,
+          payment_method: parsed.paymentMethod,
+          is_prepaid: parsed.isPrepaid
+        })
+        .select('id')
+        .single()
+    )
 
-    if (orderPayErr) {
+    const [orderRes] = await Promise.all([
+      orderInsertPromise,
+      customerUpdatePromise ? customerUpdatePromise : Promise.resolve({ data: null, error: null })
+    ])
+
+    let newOrder = orderRes.data
+    if (orderRes.error || !newOrder) {
+      // Fallback in case payment_method column missing
       const { data: fallbackOrder, error: fallbackErr } = await supabaseAdmin
         .from('crm_orders')
         .insert(basePayload)
@@ -190,30 +245,23 @@ export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise
         throw new Error(`Order creation error: ${fallbackErr?.message}`)
       }
       newOrder = fallbackOrder
-    } else {
-      newOrder = orderWithPay
     }
 
     const orderId = newOrder.id
 
-    // 4. Process Inventory Deductions in Parallel
+    // 4. Process Inventory Deductions using cached product catalog
     const executedDeductions: { productName: string; quantity: number; unit: string }[] = []
 
     if (parsed.deductions.length > 0) {
-      const productNames = parsed.deductions.map(d => d.warehouseProductName)
-      const { data: prods } = await supabaseAdmin
-        .from('products')
-        .select('id, name, unit, stock_on_hand')
-        .in('name', productNames)
-
-      const prodMap = new Map((prods || []).map(p => [p.name, p]))
+      const prodMap = await getCachedProducts()
 
       const deductionPromises = parsed.deductions.map(async (d) => {
         const prod = prodMap.get(d.warehouseProductName)
         if (!prod) return null
 
-        const currentStock = Number(prod.stock_on_hand) || 0
+        const currentStock = prod.stock_on_hand
         const updatedStock = Math.max(0, currentStock - Math.abs(d.quantity))
+        prod.stock_on_hand = updatedStock // update in-memory cache instantly
 
         await Promise.all([
           supabaseAdmin.from('inventory_transactions').insert({
@@ -244,6 +292,9 @@ export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise
         if (r) executedDeductions.push(r)
       })
     }
+
+    // Invalidate dashboard memory cache so the very next CRM poll or fetch sees this instantly!
+    invalidateDashboardCache()
 
     return {
       success: true,

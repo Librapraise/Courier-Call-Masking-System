@@ -520,12 +520,15 @@ export default function GhostCrmDashboard() {
 
   const isFetchingRef = React.useRef(false)
 
-  // Fetch Dashboard Data
-  const fetchData = useCallback(async () => {
+  // Fetch Dashboard Data (Silent background polling vs manual refresh)
+  const fetchData = useCallback(async (isManualParam: boolean | any = false) => {
+    const isManual = isManualParam === true
     if (isFetchingRef.current) return
     try {
       isFetchingRef.current = true
-      setRefreshing(true)
+      if (isManual) {
+        setRefreshing(true)
+      }
       const res = await fetch('/api/crm/dashboard')
       if (res.status === 401) {
         const redirectTarget = typeof window !== 'undefined'
@@ -575,7 +578,7 @@ export default function GhostCrmDashboard() {
     }
   }, [])
 
-  // Real-time synchronization: Instant Supabase Realtime channel + visibility-aware auto-sync
+  // Real-time synchronization: Instant Supabase Realtime channel + visibility-aware 1.5s auto-sync
   useEffect(() => {
     if (!userProfile) return
 
@@ -583,30 +586,30 @@ export default function GhostCrmDashboard() {
     const channel = supabase
       .channel('crm_realtime_sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_orders' }, () => {
-        fetchData()
+        fetchData(false)
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_couriers' }, () => {
-        fetchData()
+        fetchData(false)
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_settlements' }, () => {
-        fetchData()
+        fetchData(false)
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_day_closeouts' }, () => {
-        fetchData()
+        fetchData(false)
       })
       .subscribe()
 
-    // 2. High-frequency background sync every 4 seconds when the browser tab is focused/visible
+    // 2. High-speed silent background sync every 1.5 seconds when the browser tab is focused/visible
     const pollInterval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        fetchData()
+        fetchData(false)
       }
-    }, 4000)
+    }, 1500)
 
     // 3. Immediately refresh when user returns to this browser tab
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        fetchData()
+        fetchData(false)
       }
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -3014,7 +3017,7 @@ export default function GhostCrmDashboard() {
             {/* Refresh Data Button */}
             <button
               type="button"
-              onClick={fetchData}
+              onClick={() => fetchData(true)}
               disabled={refreshing}
               className="h-9 w-9 flex items-center justify-center rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-xs cursor-pointer shrink-0"
               title={t.refreshData}

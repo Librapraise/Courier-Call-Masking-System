@@ -9,6 +9,10 @@ import { isStaffUser } from '@/lib/auth/roles'
 import { getIsraelDateString, getIsraelMidnightIso } from '@/lib/crm/date-utils'
 import { parseDeliveryMessage, getOrderPaymentInfo } from '@/lib/crm/parser'
 import { matchBrand } from '@/lib/crm/fuzzy-matcher'
+import { getCached, setCached, invalidateDashboardCache } from '@/lib/crm/cache'
+
+// In-memory staff authorization cache (60 seconds TTL)
+const staffAuthCache = new Map<string, { isStaff: boolean; expiresAt: number }>()
 
 function getCleanCourierDisplayItems(order: { menu_items?: string | null; actual_items?: string | null }): string {
   const rawItemsStr = order.menu_items || order.actual_items || '—'
@@ -91,15 +95,33 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized: Persian Team Management requires an active manager session.' }, { status: 401 })
     }
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
+    const now = Date.now()
+    const cachedStaff = staffAuthCache.get(user.id)
+    let isStaff = false
 
-    if (!isStaffUser(user, profile)) {
+    if (cachedStaff && cachedStaff.expiresAt > now) {
+      isStaff = cachedStaff.isStaff
+    } else {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+
+      isStaff = isStaffUser(user, profile)
+      staffAuthCache.set(user.id, { isStaff, expiresAt: now + 60000 })
+    }
+
+    if (!isStaff) {
       return NextResponse.json({ error: 'Forbidden: Admin, Super Admin, or Warehouseman privileges required.' }, { status: 403 })
     }
+
+    // Ultra-fast sub-millisecond return if dashboard cache is valid
+    const cachedDashboard = getCached<any>('crm_dashboard')
+    if (cachedDashboard) {
+      return NextResponse.json(cachedDashboard)
+    }
+
     // Execute all primary dashboard queries in parallel for maximum speed
     const [
       ordersRes,
@@ -391,7 +413,7 @@ export async function GET() {
     })
 
 
-    return NextResponse.json({
+    const responsePayload = {
       metrics: {
         courierCashToday,
         totalBitCreditToday,
@@ -411,7 +433,10 @@ export async function GET() {
       recentDayCloseouts: recentDayCloseouts || [],
       latestDayCloseout: latestDayCloseout || null,
       shiftStartTime: shiftStartIso
-    })
+    }
+
+    setCached('crm_dashboard', responsePayload, 2500)
+    return NextResponse.json(responsePayload)
   } catch (err: any) {
     console.error('[CRM API] Unexpected error in GET:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
@@ -460,6 +485,9 @@ export async function POST(req: Request) {
 
     const body = await req.json()
     const { action } = body
+
+    // Invalidate dashboard memory cache for any write mutation
+    invalidateDashboardCache()
 
     if (action === 'ADJUST_STOCK') {
       const { productId, adjustmentQuantity, reason } = body
