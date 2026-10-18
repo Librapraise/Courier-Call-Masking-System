@@ -15,12 +15,15 @@ export interface IngestionResult {
   }
 }
 
+// In-memory brand cache to avoid redundant database queries during batch ingestion
+const brandCache = new Map<string, string>()
+
 /**
  * Ingests a single parsed delivery into Supabase:
- * 1. Finds or creates Brand record
+ * 1. Finds or creates Brand record (with in-memory cache)
  * 2. Upserts Customer by unique phone_number (Customer Name = Address)
  * 3. Creates Order record (captures menuItems vs actualItems)
- * 4. Deducts warehouse product stock and logs inventory_transactions
+ * 4. Deducts warehouse product stock and logs inventory_transactions in parallel
  */
 export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise<IngestionResult> {
   try {
@@ -28,27 +31,32 @@ export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise
       return { success: false, error: 'Missing phone number in delivery message' }
     }
 
-    // 1. Get or create Brand ID
-    let brandId: string | null = null
-    const { data: existingBrand } = await supabaseAdmin
-      .from('brands')
-      .select('id')
-      .eq('name', parsed.brand)
-      .maybeSingle()
+    // 1. Get or create Brand ID (using fast cache)
+    let brandId: string | null = brandCache.get(parsed.brand) || null
 
-    if (existingBrand) {
-      brandId = existingBrand.id
-    } else {
-      const { data: newBrand, error: brandInsertError } = await supabaseAdmin
+    if (!brandId) {
+      const { data: existingBrand } = await supabaseAdmin
         .from('brands')
-        .insert({ name: parsed.brand })
         .select('id')
-        .single()
+        .eq('name', parsed.brand)
+        .maybeSingle()
 
-      if (brandInsertError) {
-        console.error('[Ingest] Error creating brand:', brandInsertError)
+      if (existingBrand?.id) {
+        brandId = existingBrand.id
+        brandCache.set(parsed.brand, existingBrand.id)
       } else {
-        brandId = newBrand.id
+        const { data: newBrand, error: brandInsertError } = await supabaseAdmin
+          .from('brands')
+          .insert({ name: parsed.brand })
+          .select('id')
+          .single()
+
+        if (brandInsertError) {
+          console.error('[Ingest] Error creating brand:', brandInsertError)
+        } else if (newBrand?.id) {
+          brandId = newBrand.id
+          brandCache.set(parsed.brand, newBrand.id)
+        }
       }
     }
 
@@ -113,15 +121,15 @@ export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise
     try {
       const normalizedPhone = formatPhoneForStorage(parsed.phoneNumber)
       const cleanPhone = (parsed.phoneNumber || '').replace(/\D/g, '')
+      const last9 = cleanPhone.slice(-9)
 
-      const { data: legacyCusts } = await supabaseAdmin
+      // Direct indexed lookup instead of full table scan
+      const { data: matchedLegacy } = await supabaseAdmin
         .from('customers')
-        .select('id, phone_number')
-
-      const matchedLegacy = (legacyCusts || []).find(c => {
-        const cClean = (c.phone_number || '').replace(/\D/g, '')
-        return cClean && cleanPhone && (cClean.endsWith(cleanPhone.slice(-9)) || cleanPhone.endsWith(cClean.slice(-9)))
-      })
+        .select('id')
+        .or(`phone_number.eq.${normalizedPhone},phone_number.ilike.%${last9}`)
+        .limit(1)
+        .maybeSingle()
 
       if (matchedLegacy) {
         await supabaseAdmin
@@ -188,45 +196,53 @@ export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise
 
     const orderId = newOrder.id
 
-    // 4. Process Inventory Deductions
+    // 4. Process Inventory Deductions in Parallel
     const executedDeductions: { productName: string; quantity: number; unit: string }[] = []
 
-    for (const d of parsed.deductions) {
-      // Find matching product in database
-      const { data: prod } = await supabaseAdmin
+    if (parsed.deductions.length > 0) {
+      const productNames = parsed.deductions.map(d => d.warehouseProductName)
+      const { data: prods } = await supabaseAdmin
         .from('products')
         .select('id, name, unit, stock_on_hand')
-        .eq('name', d.warehouseProductName)
-        .maybeSingle()
+        .in('name', productNames)
 
-      if (prod) {
-        // Record negative inventory transaction
-        await supabaseAdmin.from('inventory_transactions').insert({
-          product_id: prod.id,
-          order_id: orderId,
-          quantity: -Math.abs(d.quantity),
-          reason: 'DISPATCH_DEDUCTION',
-          notes: `Deduction from order ${orderId}`
-        })
+      const prodMap = new Map((prods || []).map(p => [p.name, p]))
 
-        // Decrement live product stock_on_hand
+      const deductionPromises = parsed.deductions.map(async (d) => {
+        const prod = prodMap.get(d.warehouseProductName)
+        if (!prod) return null
+
         const currentStock = Number(prod.stock_on_hand) || 0
         const updatedStock = Math.max(0, currentStock - Math.abs(d.quantity))
 
-        await supabaseAdmin
-          .from('products')
-          .update({
-            stock_on_hand: updatedStock,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', prod.id)
+        await Promise.all([
+          supabaseAdmin.from('inventory_transactions').insert({
+            product_id: prod.id,
+            order_id: orderId,
+            quantity: -Math.abs(d.quantity),
+            reason: 'DISPATCH_DEDUCTION',
+            notes: `Deduction from order ${orderId}`
+          }),
+          supabaseAdmin
+            .from('products')
+            .update({
+              stock_on_hand: updatedStock,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', prod.id)
+        ])
 
-        executedDeductions.push({
+        return {
           productName: prod.name,
           quantity: d.quantity,
           unit: prod.unit
-        })
-      }
+        }
+      })
+
+      const results = await Promise.all(deductionPromises)
+      results.forEach(r => {
+        if (r) executedDeductions.push(r)
+      })
     }
 
     return {

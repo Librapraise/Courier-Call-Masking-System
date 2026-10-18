@@ -518,9 +518,13 @@ export default function GhostCrmDashboard() {
     localStorage.setItem('ghostcrm_lang', nextLang)
   }
 
+  const isFetchingRef = React.useRef(false)
+
   // Fetch Dashboard Data
   const fetchData = useCallback(async () => {
+    if (isFetchingRef.current) return
     try {
+      isFetchingRef.current = true
       setRefreshing(true)
       const res = await fetch('/api/crm/dashboard')
       if (res.status === 401) {
@@ -565,10 +569,54 @@ export default function GhostCrmDashboard() {
     } catch (err) {
       console.error('[GhostCRM] Fetch error:', err)
     } finally {
+      isFetchingRef.current = false
       setLoading(false)
       setRefreshing(false)
     }
   }, [])
+
+  // Real-time synchronization: Instant Supabase Realtime channel + visibility-aware auto-sync
+  useEffect(() => {
+    if (!userProfile) return
+
+    // 1. Instant Supabase Realtime channel subscription for changes to orders, couriers, settlements
+    const channel = supabase
+      .channel('crm_realtime_sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_orders' }, () => {
+        fetchData()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_couriers' }, () => {
+        fetchData()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_settlements' }, () => {
+        fetchData()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_day_closeouts' }, () => {
+        fetchData()
+      })
+      .subscribe()
+
+    // 2. High-frequency background sync every 4 seconds when the browser tab is focused/visible
+    const pollInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchData()
+      }
+    }, 4000)
+
+    // 3. Immediately refresh when user returns to this browser tab
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchData()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      clearInterval(pollInterval)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      supabase.removeChannel(channel)
+    }
+  }, [userProfile, fetchData])
 
   // Auto-scroll Hero Carousel every 6 seconds unless hovered
   useEffect(() => {

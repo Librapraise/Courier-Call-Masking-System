@@ -83,9 +83,90 @@ export function extractPrice(text: string): number {
   return 0.0
 }
 
+// Common payment verb roots in Hebrew: משלם, משלמת, משלמים, שולם, שולמו, שילם, שילמה, שילמו, תשלום, הועבר, הועברו, העברה, סליקה, שלח, שולח
+export const HE_PAY_VERBS = '(?:משל[םמ](?:ת|ים)?|שול[םמ](?:ו)?|שיל[םמ](?:ה|ו)?|תשלום|הועבר(?:ו)?|העברה|סליק(?:ה|ת)?|ש[לו]לח)'
+
+// ATM Cash Withdrawal Code ("קוד משיכה" / "בקוד משיכה" / "משלם בקוד" / "שילם בקוד" / "כספומט" / "במשיכה")
+export const ATM_CODE_REGEX = new RegExp(
+  `(?:` +
+    `(?:ב?קוד\\s*(?:ל?משיכה|כספומט|ללא\\s*כרטיס)|ב?משיכה\\s*ללא\\s*כרטיס|ב?כספומט)` +
+    `|${HE_PAY_VERBS}\\s+(?:ב?קוד(?:\\s*משיכה|\\s*כספומט)?|ב?משיכה|ב?כספומט)` +
+    `|(?:^|[^\\u0590-\\u05FFa-z0-9])(?:ב?קוד\\s*משיכה|במשיכה|בקוד\\s*כספומט)(?:$|[^\\u0590-\\u05FFa-z0-9])` +
+    `|(?:^|[^\\u0590-\\u05FFa-z0-9])בקוד(?:\\s*:\\s*\\d+|\\s+\\d+)(?:$|[^\\u0590-\\u05FFa-z0-9])` +
+    `|\\b(?:(?:in\\s+)?withdrawal\\s*code|(?:in\\s+)?atm\\s*code|cardless\\s*withdrawal|(?:paid|pay|paying|payer)\\s+(?:via|with|by|in)?\\s*atm)\\b` +
+  `)`,
+  'i'
+)
+
+// Crypto & Wallet ("קריפטו" / "בקריפטו" / "בארנק" / "לארנק" / "ארנק" / "ביטקוין" / "USDT")
+export const CRYPTO_REGEX = new RegExp(
+  `(?:` +
+    `${HE_PAY_VERBS}\\s+(?:ב?קריפטו|ב?ארנק|ל?ארנק|ב?ביטקוין|ב?usdt|ב?btc|ב?eth)` +
+    `|(?:^|[^\\u0590-\\u05FFa-z0-9])ב?קריפטו(?:$|[^\\u0590-\\u05FFa-z0-9])` +
+    `|(?:^|[^\\u0590-\\u05FFa-z0-9])(?:ב?ארנק(?:\\s+קריפטו|\\s+דיגיטלי)?|לארנק(?:\\s+קריפטו|\\s+דיגיטלי)?)(?:$|[^\\u0590-\\u05FFa-z0-9])` +
+    `|(?:^|[^\\u0590-\\u05FFa-z0-9])(?:ב?ביטקוין|bitcoin|usdt|ב-?usdt|btc|eth|איתריום|באיתריום)(?:$|[^\\u0590-\\u05FFa-z0-9])` +
+    `|\\b(?:(?:in\\s+)?crypto|(?:in|to)\\s+wallet|crypto\\s*wallet|(?:paid|pay|paying|payer)\\s+(?:via|with|by|in)?\\s*(?:crypto|wallet|bitcoin|usdt|btc))\\b` +
+  `)`,
+  'i'
+)
+
+// Bit payment ("משלם בביט" / "שילם בביט" / "שולם בביט" / "משלם ביט" / "שילם ביט" / "בביט" / "ביט")
+export const BIT_REGEX = new RegExp(
+  `(?:` +
+    `${HE_PAY_VERBS}\\s+ב?ביט(?![\\u0590-\\u05FFa-z0-9])` +
+    `|(?:באפליקציית|באפליקציה|דרך|באמצעות)\\s+ב?ביט(?![\\u0590-\\u05FFa-z0-9])` +
+    `|\\d+\\s*(?:₪|ש"ח|שח)?\\s*בביט(?![\\u0590-\\u05FFa-z0-9])` +
+    `|(?:^|[^\\u0590-\\u05FFa-z0-9])בביט(?:$|[^\\u0590-\\u05FFa-z0-9])` +
+    `|(?:^|[^\\u0590-\\u05FFa-z0-9])ביט(?![\\s]*[י]?ם)(?:$|[^\\u0590-\\u05FFa-z0-9])` +
+    `|\\b(?:(?:paid|pay|paying|payer)\\s+(?:via|with|by|in)?\\s*bit|in\\s+bit|bit\\s+payment)\\b` +
+  `)`,
+  'i'
+)
+
+// Credit card / Bank transfer ("משלם באשראי" / "שילם באשראי" / "באשראי" / "העברה בנקאית")
+export const CREDIT_REGEX = new RegExp(
+  `(?:` +
+    `${HE_PAY_VERBS}\\s+(?:ב?אשראי|כרטיס\\s*אשראי|בכרטיס\\s*אשראי|ב?העברה(?:\\s*בנקאית)?|בנקאי)` +
+    `|(?:^|[^\\u0590-\\u05FFa-z0-9])(?:ב?אשראי|כרטיס\\s*אשראי|בכרטיס\\s*אשראי|ב?העברה\\s*בנקאית|בהעברה)(?:$|[^\\u0590-\\u05FFa-z0-9])` +
+    `|\\b(?:(?:in\\s+)?credit(?:\\s*card)?|bank\\s*transfer|(?:paid|pay|paying|payer)\\s+(?:via|with|by|in)?\\s*(?:credit|credit\\s*card|bank\\s*transfer))\\b` +
+  `)`,
+  'i'
+)
+
+// General prepaid / zero collect ("שולם מראש" / "משלם מראש" / "0₪ לגביה" / "לגבות: 0")
+export const PREPAID_REGEX = new RegExp(
+  `(?:` +
+    `${HE_PAY_VERBS}\\s+מראש` +
+    `|(?:^|[^\\u0590-\\u05FFa-z0-9])מראש(?:$|[^\\u0590-\\u05FFa-z0-9])` +
+    `|(?:לגבות\\s*:\\s*0|לגבות\\s+0|0\\s*לגבות|0\\s*₪?\\s*לגב(?:יי)?ה|אין\\s*לגבות|לא\\s*לגבות|ללא\\s*גב(?:יי)?ה|0\\s*במזומן|ללא\\s*מזומן)` +
+    `|(?:^|\\s)0\\s*(?:₪|ש"ח|שח)\\b` +
+    `|\\b(?:prepaid|paid\\s+in\\s+advance|zero\\s+cash|collect\\s+0)\\b` +
+  `)`,
+  'i'
+)
+
+/**
+ * Checks whether a single line is a payment announcement (e.g. "משלם בביט", "שולם בקריפטו", "בארנק", "בקוד משיכה").
+ * Used to avoid mistakenly classifying payment notes as menu items or warehouse deductions.
+ */
+export function isPaymentLine(line: string): boolean {
+  if (!line || line.trim().length === 0) return false
+  const hasBitsProduct = /(?:ביטים|בביטים|\bbits\b)/i.test(line)
+  if (hasBitsProduct && !/(?:שולם|שילם|משלם|תשלום|הועבר|סליקה|לגבות|0₪)/i.test(line)) {
+    return false
+  }
+  return (
+    ATM_CODE_REGEX.test(line) ||
+    CRYPTO_REGEX.test(line) ||
+    BIT_REGEX.test(line) ||
+    CREDIT_REGEX.test(line) ||
+    PREPAID_REGEX.test(line)
+  )
+}
+
 /**
  * Extracts payment method and prepaid status from text.
- * Detects: קריפטו, ביט, אשראי, שולם מראש, שולם בביט, 0₪, לגבות 0, etc.
+ * Detects: קריפטו, ארנק, ביט, קוד משיכה, אשראי, שולם מראש, 0₪, לגבות 0, etc.
  */
 export function extractPaymentDetails(text: string, totalPrice: number): {
   paymentMethod: PaymentMethod
@@ -95,31 +176,16 @@ export function extractPaymentDetails(text: string, totalPrice: number): {
 } {
   const lower = (text || '').toLowerCase()
 
-  // Match ATM Cash Withdrawal Code ("קוד משיכה" / "משלם בקוד משיכה" / "קוד כספומט" / "במשיכה")
-  const hasAtmCode =
-    /(?:קוד\s*משיכה|בקוד\s*משיכה|משל[םמ]?(?:ת|ים)?\s*(?:ב?קוד(?:\s*משיכה)?|במשיכה)|שולם\s*ב?קוד|הועבר\s*ב?קוד|משיכה\s*ללא\s*כרטיס|קוד\s*כספומט|במשיכה)/i.test(lower)
-
-  // Match Crypto phrases
-  const hasCrypto =
-    /(?:שולם\s+ב?קריפטו|הועבר\s+ב?קריפטו|סליקה\s+ב?קריפטו|משלמ?ת?\s+ב?קריפטו|(?:\d+\s*(?:₪|ש"ח|שח)?\s*ב?קריפטו)|(?:^|\s)בקריפטו(?:$|\s|[.,!‼️?]+)|(?:^|\s)קריפטו(?:$|\s|[.,!‼️?]+)|paid\s+(?:via|with|by|in)\s+crypto|(?:^|\s)crypto(?:$|\s|[.,!‼️?]+)|(?:שולם\s+ב?|הועבר\s+ב?)?(?:ביטקוין|בביטקוין|bitcoin|usdt|btc))/i.test(lower)
-
-  // Match ONLY explicit Bit payment phrases like "שולם בביט", "הועבר בביט", "משלם בביט"
-  // NEVER standalone "ביט" or "ביטים" or "בביט" (which is a warehouse strain/product category!)
-  const hasBit =
-    /(?:שולם\s+ב?ביט|הועבר\s+ב?ביט|סליקה\s+ב?ביט|באפליקציית\s+ביט|משלמ?ת?\s+ב?ביט|(?:\d+\s*(?:₪|ש"ח|שח)?\s*בביט)|paid\s+(?:via|with|by|in)\s+bit)/i.test(lower)
-
-  // Match explicit credit phrases
-  const hasCredit =
-    /(?:שולם\s+ב?אשראי|סליקה\s+ב?אשראי|באשראי|כרטיס\s+אשראי|paid\s+(?:via|with|by|in)\s+credit)/i.test(lower)
-
-  // Match explicit prepaid / zero collect phrases
+  const hasAtmCode = ATM_CODE_REGEX.test(lower)
+  const hasCrypto = CRYPTO_REGEX.test(lower)
+  const hasBit = BIT_REGEX.test(lower)
+  const hasCredit = CREDIT_REGEX.test(lower)
   const hasPrepaid =
     hasAtmCode ||
     hasCrypto ||
     hasBit ||
     hasCredit ||
-    /(?:שולם\s+מראש|שולם\s+קודם|prepaid|paid\s+in\s+advance|לגבות\s*:\s*0|לגבות\s+0|0\s*₪?\s*לגב(?:יי)?ה)/i.test(lower) ||
-    /(?:^|\s)0\s*(?:₪|ש"ח|שח)\b/.test(lower) ||
+    PREPAID_REGEX.test(lower) ||
     totalPrice === 0
 
   if (hasAtmCode) {
@@ -136,7 +202,7 @@ export function extractPaymentDetails(text: string, totalPrice: number): {
       paymentMethod: 'CRYPTO',
       isPrepaid: true,
       cashToCollect: 0,
-      paymentLabel: 'שולם בקריפטו'
+      paymentLabel: 'שולם בקריפטו / ארנק'
     }
   }
 
@@ -203,7 +269,7 @@ export function getOrderPaymentInfo(order: {
   const isFalseBitProduct =
     order.payment_method === 'BIT' &&
     /(?:ביטים|בביטים|\bbits\b)/i.test([order.raw_message, order.menu_items].join(' ')) &&
-    !/(?:שולם\s+ב?ביט|הועבר\s+ב?ביט|סליקה\s+ב?ביט|באפליקציית\s+ביט|משלמ?ת?\s+(?:\d+\s+)?ב?ביט|שולם\s+מראש|לגבות\s*:\s*0|0\s*₪?\s*לגב(?:יי)?ה)/i.test(order.raw_message || '')
+    !/(?:שולם\s+ב?ביט|שיל[םמ]\s+ב?ביט|משל[םמ]?(?:ת|ים)?\s+ב?ביט|תשלום\s+ב?ביט|הועבר\s+ב?ביט|העברה\s+ב?ביט|סליקה\s+ב?ביט|באפליקציית\s+ביט|שולם\s+מראש|לגבות\s*:\s*0|0\s*₪?\s*לגב(?:יי)?ה|(?:^|[^\u0590-\u05FFa-z0-9])בביט(?:$|[^\u0590-\u05FFa-z0-9]))/i.test(order.raw_message || '')
 
   const effectivePaymentMethod = isFalseBitProduct ? 'CASH' : (order.payment_method || 'CASH')
   const effectiveIsPrepaid = isFalseBitProduct ? false : (order.is_prepaid === true)
@@ -218,23 +284,10 @@ export function getOrderPaymentInfo(order: {
 
   const lower = rawAndNotes.toLowerCase()
 
-  // Match ATM Cash Withdrawal Code ("קוד משיכה" / "משלם בקוד משיכה" / "קוד כספומט" / "במשיכה")
-  const hasAtmCode =
-    effectivePaymentMethod === 'ATM_CODE' ||
-    /(?:קוד\s*משיכה|בקוד\s*משיכה|משל[םמ]?(?:ת|ים)?\s*(?:ב?קוד(?:\s*משיכה)?|במשיכה)|שולם\s*ב?קוד|הועבר\s*ב?קוד|משיכה\s*ללא\s*כרטיס|קוד\s*כספומט|במשיכה)/i.test(lower)
-
-  const hasCrypto =
-    effectivePaymentMethod === 'CRYPTO' ||
-    /(?:שולם\s+ב?קריפטו|הועבר\s+ב?קריפטו|סליקה\s+ב?קריפטו|משלמ?ת?\s+ב?קריפטו|(?:\d+\s*(?:₪|ש"ח|שח)?\s*ב?קריפטו)|(?:^|\s)בקריפטו(?:$|\s|[.,!‼️?]+)|(?:^|\s)קריפטו(?:$|\s|[.,!‼️?]+)|paid\s+(?:via|with|by|in)\s+crypto|(?:^|\s)crypto(?:$|\s|[.,!‼️?]+)|(?:שולם\s+ב?|הועבר\s+ב?)?(?:ביטקוין|בביטקוין|bitcoin|usdt|btc))/i.test(lower)
-
-  const hasBit =
-    effectivePaymentMethod === 'BIT' ||
-    /(?:שולם\s+ב?ביט|הועבר\s+ב?ביט|סליקה\s+ב?ביט|באפליקציית\s+ביט|משלמ?ת?\s+ב?ביט|(?:\d+\s*(?:₪|ש"ח|שח)?\s*בביט)|paid\s+(?:via|with|by|in)\s+bit)/i.test(lower)
-
-  const hasCredit =
-    effectivePaymentMethod === 'CREDIT' ||
-    /(?:שולם\s+ב?אשראי|סליקה\s+ב?אשראי|באשראי|כרטיס\s+אשראי|paid\s+(?:via|with|by|in)\s+credit)/i.test(lower)
-
+  const hasAtmCode = effectivePaymentMethod === 'ATM_CODE' || ATM_CODE_REGEX.test(lower)
+  const hasCrypto = effectivePaymentMethod === 'CRYPTO' || CRYPTO_REGEX.test(lower)
+  const hasBit = effectivePaymentMethod === 'BIT' || BIT_REGEX.test(lower)
+  const hasCredit = effectivePaymentMethod === 'CREDIT' || CREDIT_REGEX.test(lower)
   const hasPrepaid =
     isPrepaidFlag ||
     hasAtmCode ||
@@ -242,8 +295,7 @@ export function getOrderPaymentInfo(order: {
     hasBit ||
     hasCredit ||
     effectivePaymentMethod === 'PREPAID' ||
-    /(?:שולם\s+מראש|שולם\s+קודם|prepaid|paid\s+in\s+advance|לגבות\s*:\s*0|לגבות\s+0|0\s*₪?\s*לגב(?:יי)?ה)/i.test(lower) ||
-    /(?:^|\s)0\s*(?:₪|ש"ח|שח)\b/.test(lower) ||
+    PREPAID_REGEX.test(lower) ||
     Number(order.total_price || 0) === 0
 
   const method: PaymentMethod = hasAtmCode
@@ -265,7 +317,7 @@ export function getOrderPaymentInfo(order: {
   const labelHe = hasAtmCode
     ? 'שולם בקוד משיכה (אצל מחסנאי)'
     : hasCrypto
-    ? 'שולם בקריפטו'
+    ? 'שולם בקריפטו / ארנק'
     : hasBit
     ? 'שולם בביט'
     : hasCredit
@@ -304,7 +356,7 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
   const rawLines = cleanRaw
     .split('\n')
     .map(l => l.trim())
-    .filter(l => l.length > 0 && !/^(?:אתמול ב-|היום ב-|\d{1,2}[:.]\d{2}\s|forwarded from)/i.test(l))
+    .filter(l => l.length > 0 && !/^(?:אתמול ב-|היום ב-|\d{1,2}[:.]\d{2}(?:\s|$)|forwarded from|הודעה שהועברה|נשלח מ-|.*(?:הסדרן|סדרן\b|המוקד|מוקד הזמנות).*)/i.test(l))
 
   let customerName = ''
   let city = ''
@@ -337,9 +389,7 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
     for (let i = brandLineIndex + 1; i < rawLines.length; i++) {
       const line = rawLines[i]
       // Payment indicators (e.g. "שולם בקריפטו", "שולם בביט", "משלם בקוד משיכה") are never warehouse deductions
-      const isPaymentLine = /(?:שולם|הועבר|סליקה|משל[םמ]?(?:ת|ים)?|קריפטו|crypto|ביט|bit|אשראי|credit|prepaid|קוד\s*משיכה|בקוד|במשיכה|כספומט)/i.test(line) &&
-        !/(?:ביטים|בביטים)/i.test(line)
-      if (!isPaymentLine) {
+      if (!isPaymentLine(line)) {
         trailingDeductionLines.push(line)
       }
     }
@@ -444,17 +494,15 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
       }
     } else {
       // Check if this line is an item line (not address, phone, price, handle, tier, brand, or payment line)
-      const isPaymentLine = /(?:שולם|הועבר|סליקה|משלמ?ת?|קריפטו|crypto|ביט|bit|אשראי|credit|prepaid|קוד\s+משיכה|כספומט|במשיכה)/i.test(line) &&
-        !/(?:ביטים|בביטים)/i.test(line)
-
+      const isPayLine = isPaymentLine(line)
       const isBrandLine = Boolean(matchBrand(line))
-      const isVerificationLine = /(?:אימות|אושר|אישור\s*הזמנה|מאושר|בדיקה|מנהל\s+גיבוי\s+הזמנות)/i.test(line)
+      const isVerificationLine = /(?:אימות|אושר|אישור\s*הזמנה|מאושר|בדיקה|מנהל\s+גיבוי\s+הזמנות|סדרן|הסדרן|מוקד|המוקד)/i.test(line)
 
       const isNotMeta = !line.match(phoneRegex) &&
         !line.match(/@([A-Za-z0-9_]+)/) &&
         !line.match(/(?:₪|ש"ח|כולל משלוח)/) &&
         !line.match(/לקוח קבוע|לקוח חדש/) &&
-        !isPaymentLine &&
+        !isPayLine &&
         !isBrandLine &&
         !isVerificationLine &&
         line !== customerName
@@ -514,7 +562,7 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
 
   // If customer paid via ATM withdrawal code and specified explicit amount (e.g. "משלם בקוד משיכה 1300 ‼️")
   if (paymentDetails.paymentMethod === 'ATM_CODE') {
-    const atmMatch = cleanRaw.match(/(?:משלמ?ת?\s+ב?קוד\s+משיכה|קוד\s+משיכה|במשיכה|קוד\s+כספומט)\s*(\d[\d,]*)/i)
+    const atmMatch = cleanRaw.match(/(?:(?:משל[םמ](?:ת|ים)?|שול[םמ]|שיל[םמ]|תשלום)\s+(?:ב?קוד(?:\s*משיכה)?|ב?משיכה|ב?כספומט)|ב?קוד\s*משיכה|ב?משיכה|ב?קוד\s*כספומט|בקוד)\s*(?::\s*)?(\d[\d,]*)/i)
     if (atmMatch) {
       const explicitAtmPrice = parseFloat(atmMatch[1].replace(/,/g, ''))
       if (!isNaN(explicitAtmPrice) && explicitAtmPrice > 0) {

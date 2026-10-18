@@ -5,6 +5,33 @@ import { sendTelegramMessage, formatBatchReceipt } from '@/lib/crm/telegram-bot'
 import { supabaseAdmin } from '@/lib/supabase/server'
 import { getIsraelMidnightIso } from '@/lib/crm/date-utils'
 
+// In-memory cache for dynamic admin Telegram IDs to prevent slow listUsers calls on every webhook hit
+let cachedDynamicAdminIds: Set<string> = new Set()
+let cachedDynamicAdminIdsExpiresAt = 0
+
+async function getDynamicAdminTelegramIds(): Promise<Set<string>> {
+  const now = Date.now()
+  if (cachedDynamicAdminIdsExpiresAt > now) {
+    return cachedDynamicAdminIds
+  }
+  try {
+    const { data: usersData } = await supabaseAdmin.auth.admin.listUsers()
+    const newSet = new Set<string>()
+    if (usersData?.users) {
+      usersData.users.forEach(u => {
+        const tid = u.user_metadata?.telegram_id?.toString()
+        if (tid) newSet.add(tid)
+      })
+    }
+    cachedDynamicAdminIds = newSet
+    cachedDynamicAdminIdsExpiresAt = now + 5 * 60 * 1000 // Cache for 5 minutes
+    return newSet
+  } catch (err) {
+    console.warn('[TelegramWebhook] Error refreshing dynamic admin cache:', err)
+    return cachedDynamicAdminIds
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -37,20 +64,11 @@ export async function POST(req: NextRequest) {
 
     let isAuthorized = allowedIds.length === 0 || (senderId ? allowedIds.includes(senderId) : false)
 
-    // Dynamic database check: also accept Telegram IDs saved in admin user profiles
+    // Dynamic database check: also accept Telegram IDs saved in admin user profiles (with 5-minute memory cache)
     if (!isAuthorized && senderId) {
-      try {
-        const { data: usersData } = await supabaseAdmin.auth.admin.listUsers()
-        if (usersData?.users) {
-          const dbAllowed = usersData.users.some(
-            u => u.user_metadata?.telegram_id?.toString() === senderId.toString()
-          )
-          if (dbAllowed) {
-            isAuthorized = true
-          }
-        }
-      } catch (err) {
-        console.warn('[TelegramWebhook] Error checking database whitelist:', err)
+      const dynamicIds = await getDynamicAdminTelegramIds()
+      if (dynamicIds.has(senderId.toString())) {
+        isAuthorized = true
       }
     }
 
@@ -74,80 +92,84 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, status: 'command_handled' })
     }
 
-    // 3. Process delivery message (Supports single or batch forwarded text)
-    // Sometimes dispatchers forward a block of text containing multiple dispatches separated by blank lines or headers
+    // 3. Process delivery message (Supports single or batch forwarded text in parallel)
     const rawBlocks = messageText.includes('---') 
       ? messageText.split('---') 
       : [messageText]
+
+    const validBlocks = rawBlocks.map(b => b.trim()).filter(b => b.length >= 10)
+
+    // Process all forwarded orders concurrently in parallel for lightning-fast ingestion
+    const ingestResults = await Promise.all(
+      validBlocks.map(async (cleanBlock) => {
+        const parsed = parseDeliveryMessage(cleanBlock)
+        if (!parsed.phoneNumber || !parsed.customerName) return null
+        const result = await ingestParsedDelivery(parsed)
+        return { parsed, result }
+      })
+    )
 
     let processedCount = 0
     let totalBatchCash = 0
     const allDeductions: { productName: string; quantity: number; unit: string }[] = []
     const recentDeliveries: { address: string; brand: string; price: number }[] = []
 
-    for (const block of rawBlocks) {
-      const cleanBlock = block.trim()
-      if (cleanBlock.length < 10) continue
+    for (const item of ingestResults) {
+      if (!item) continue
+      const { parsed, result } = item
+      if (result.success && result.orderSummary) {
+        processedCount++
+        totalBatchCash += result.orderSummary.price
+        recentDeliveries.push({
+          address: result.orderSummary.address,
+          brand: result.orderSummary.brand,
+          price: result.orderSummary.price
+        })
 
-      const parsed = parseDeliveryMessage(cleanBlock)
-
-      // Only ingest if it has minimum required fields: phone number and customer name
-      if (parsed.phoneNumber && parsed.customerName) {
-        const result = await ingestParsedDelivery(parsed)
-        if (result.success && result.orderSummary) {
-          processedCount++
-          totalBatchCash += result.orderSummary.price
-          recentDeliveries.push({
-            address: result.orderSummary.address,
-            brand: result.orderSummary.brand,
-            price: result.orderSummary.price
-          })
-
-          for (const d of result.orderSummary.deductions) {
-            const existing = allDeductions.find(x => x.productName === d.productName)
-            if (existing) {
-              existing.quantity += d.quantity
-            } else {
-              allDeductions.push({ ...d })
-            }
+        for (const d of result.orderSummary.deductions) {
+          const existing = allDeductions.find(x => x.productName === d.productName)
+          if (existing) {
+            existing.quantity += d.quantity
+          } else {
+            allDeductions.push({ ...d })
           }
+        }
 
-          // Instant notification to warehouseman for ATM Cash Withdrawal Codes
-          if (parsed.paymentMethod === 'ATM_CODE') {
-            const warehouseTelegramIds = new Set<string>()
-            const whEnv = (process.env.WAREHOUSE_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
-            whEnv.forEach(id => warehouseTelegramIds.add(id))
-            const adminEnv = (process.env.ALLOWED_TELEGRAM_ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
-            adminEnv.forEach(id => warehouseTelegramIds.add(id))
+        // Instant notification to warehouseman for ATM Cash Withdrawal Codes
+        if (parsed.paymentMethod === 'ATM_CODE') {
+          const warehouseTelegramIds = new Set<string>()
+          const whEnv = (process.env.WAREHOUSE_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
+          whEnv.forEach(id => warehouseTelegramIds.add(id))
+          const adminEnv = (process.env.ALLOWED_TELEGRAM_ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
+          adminEnv.forEach(id => warehouseTelegramIds.add(id))
 
-            const botToken = process.env.TELEGRAM_BOT_TOKEN || ''
-            if (botToken && warehouseTelegramIds.size > 0) {
-              const atmAlertText =
-                `🏧 *התראת קוד משיכה מכספומט למחסנאי!*\n` +
-                `━━━━━━━━━━━━━━━━━━━━━\n` +
-                `📍 *כתובת לקוח:* ${parsed.customerName}\n` +
-                `🏙️ *עיר:* ${parsed.city}\n` +
-                `💰 *סכום למשיכה:* *₪${parsed.totalPrice.toLocaleString()}*\n` +
-                `📱 *טלפון:* \`${parsed.phoneNumber}\`\n` +
-                (parsed.telegramHandle ? `👤 *טלגרם:* ${parsed.telegramHandle}\n` : '') +
-                `🏷️ *מותג:* ${parsed.brand}\n` +
-                `━━━━━━━━━━━━━━━━━━━━━\n` +
-                `📝 *תוכן ההזמנה והקוד:*\n` +
-                `${parsed.rawText}\n` +
-                `━━━━━━━━━━━━━━━━━━━━━\n` +
-                `⚡ *הנחיה למחסנאי:* יש למשוך את הכסף מהכספומט ולנעול בכספת.\n` +
-                `🛵 *לשליח שובצה גבייה:* *0₪* (שולם בקוד).`
+          const botToken = process.env.TELEGRAM_BOT_TOKEN || ''
+          if (botToken && warehouseTelegramIds.size > 0) {
+            const atmAlertText =
+              `🏧 *התראת קוד משיכה מכספומט למחסנאי!*\n` +
+              `━━━━━━━━━━━━━━━━━━━━━\n` +
+              `📍 *כתובת לקוח:* ${parsed.customerName}\n` +
+              `🏙️ *עיר:* ${parsed.city}\n` +
+              `💰 *סכום למשיכה:* *₪${parsed.totalPrice.toLocaleString()}*\n` +
+              `📱 *טלפון:* \`${parsed.phoneNumber}\`\n` +
+              (parsed.telegramHandle ? `👤 *טלגרם:* ${parsed.telegramHandle}\n` : '') +
+              `🏷️ *מותג:* ${parsed.brand}\n` +
+              `━━━━━━━━━━━━━━━━━━━━━\n` +
+              `📝 *תוכן ההזמנה והקוד:*\n` +
+              `${parsed.rawText}\n` +
+              `━━━━━━━━━━━━━━━━━━━━━\n` +
+              `⚡ *הנחיה למחסנאי:* יש למשוך את הכסף מהכספומט ולנעול בכספת.\n` +
+              `🛵 *לשליח שובצה גבייה:* *0₪* (שולם בקוד).`
 
-              for (const whId of warehouseTelegramIds) {
-                try {
-                  await sendTelegramMessage(botToken, {
-                    chat_id: whId,
-                    parse_mode: 'Markdown',
-                    text: atmAlertText
-                  })
-                } catch (whErr) {
-                  console.warn('[TelegramWebhook] Error sending ATM code alert to warehouseman:', whErr)
-                }
+            for (const whId of warehouseTelegramIds) {
+              try {
+                await sendTelegramMessage(botToken, {
+                  chat_id: whId,
+                  parse_mode: 'Markdown',
+                  text: atmAlertText
+                })
+              } catch (whErr) {
+                console.warn('[TelegramWebhook] Error sending ATM code alert to warehouseman:', whErr)
               }
             }
           }

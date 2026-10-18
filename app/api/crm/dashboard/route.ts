@@ -100,131 +100,95 @@ export async function GET() {
     if (!isStaffUser(user, profile)) {
       return NextResponse.json({ error: 'Forbidden: Admin, Super Admin, or Warehouseman privileges required.' }, { status: 403 })
     }
-    // 1. Fetch Orders with Customer, Brand, and Courier relationships
-    const { data: orders, error: ordersError } = await supabaseAdmin
-      .from('crm_orders')
-      .select(`
-        id,
-        address,
-        city,
-        menu_items,
-        actual_items,
-        total_price,
-        is_settled,
-        order_date,
-        raw_message,
-        customer_id,
-        brand_id,
-        courier_id,
-        crm_customers:customer_id (
+    // Execute all primary dashboard queries in parallel for maximum speed
+    const [
+      ordersRes,
+      brandsRes,
+      productsRes,
+      couriersRes,
+      closeoutsRes,
+      customersRes,
+      recentSettlementsRes
+    ] = await Promise.all([
+      supabaseAdmin
+        .from('crm_orders')
+        .select(`
           id,
-          address_name,
-          phone_number,
-          telegram_handle,
-          customer_type,
-          total_orders,
-          total_spent
-        ),
-        brands:brand_id (
-          id,
-          name
-        ),
-        crm_couriers:courier_id (
-          id,
-          name,
-          phone_number
-        )
-      `)
-      .order('order_date', { ascending: false })
-      .limit(200)
+          address,
+          city,
+          menu_items,
+          actual_items,
+          total_price,
+          is_settled,
+          order_date,
+          raw_message,
+          customer_id,
+          brand_id,
+          courier_id,
+          crm_customers:customer_id (
+            id,
+            address_name,
+            phone_number,
+            telegram_handle,
+            customer_type,
+            total_orders,
+            total_spent
+          ),
+          brands:brand_id (
+            id,
+            name
+          ),
+          crm_couriers:courier_id (
+            id,
+            name,
+            phone_number
+          )
+        `)
+        .order('order_date', { ascending: false })
+        .limit(200),
+      supabaseAdmin
+        .from('brands')
+        .select('id, name')
+        .order('name'),
+      supabaseAdmin
+        .from('products')
+        .select('*')
+        .order('category'),
+      supabaseAdmin
+        .from('crm_couriers')
+        .select('*')
+        .order('name'),
+      supabaseAdmin
+        .from('crm_day_closeouts')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10),
+      supabaseAdmin
+        .from('crm_customers')
+        .select('*, brands:last_brand_id(name)')
+        .order('created_at', { ascending: false }),
+      supabaseAdmin
+        .from('cash_settlements')
+        .select('id, courier_id, settlement_date, gross_collected, courier_pay, bonus_amount, net_expected, amount_received, status, notes, created_at, crm_couriers(name, phone_number, telegram_id)')
+        .order('created_at', { ascending: false })
+        .limit(15)
+    ])
 
-    if (ordersError) {
-      console.warn('[CRM API] Orders query fallback:', ordersError.message)
+    const orders = ordersRes.data || []
+    if (ordersRes.error) {
+      console.warn('[CRM API] Orders query fallback:', ordersRes.error.message)
     }
 
-    // 2. Fetch all Brands
-    const { data: brandsData } = await supabaseAdmin
-      .from('brands')
-      .select('id, name')
-      .order('name')
-
+    const brandsData = brandsRes.data
     const brands = brandsData && brandsData.length > 0
       ? brandsData
       : BRANDS_LIST.map((name, i) => ({ id: `brand-${i}`, name }))
 
-    // 3. Fetch live Products Inventory
-    const { data: products } = await supabaseAdmin
-      .from('products')
-      .select('*')
-      .order('category')
+    const products = productsRes.data || []
+    let couriersData = couriersRes.data || []
 
-    // 4. Fetch Couriers (with auto-sync from profiles roster)
-    let { data: couriersData } = await supabaseAdmin
-      .from('crm_couriers')
-      .select('*')
-      .order('name')
-
-    // Safeguard: Ensure any courier account in profiles is automatically synced into crm_couriers roster
-    try {
-      const { data: courierProfiles } = await supabaseAdmin
-        .from('profiles')
-        .select('id, email, phone_number')
-        .eq('role', 'courier')
-
-      if (courierProfiles && courierProfiles.length > 0) {
-        const existingPhones = new Set(
-          (couriersData || []).map(c => (c.phone_number || '').replace(/\D/g, '').slice(-9))
-        )
-        const missing = courierProfiles.filter(p => {
-          const cleanP = (p.phone_number || '').replace(/\D/g, '').slice(-9)
-          return cleanP && !existingPhones.has(cleanP)
-        })
-
-        if (missing.length > 0) {
-          const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers()
-          const authMap = new Map((authUsers?.users || []).map(u => [u.id, u]))
-
-          for (const m of missing) {
-            const u = authMap.get(m.id)
-            const meta = u ? u.user_metadata : {}
-            const name = meta.name || meta.full_name || (m.email ? m.email.split('@')[0] : 'Courier')
-            const telegramId = meta.telegram_id ? Number(meta.telegram_id) : null
-
-            await supabaseAdmin.from('crm_couriers').insert({
-              name,
-              phone_number: m.phone_number,
-              telegram_id: telegramId,
-              is_active: true
-            })
-          }
-
-          const { data: refreshedCouriers } = await supabaseAdmin
-            .from('crm_couriers')
-            .select('*')
-            .order('name')
-          if (refreshedCouriers) {
-            couriersData = refreshedCouriers
-          }
-        }
-      }
-    } catch (syncErr) {
-      console.warn('[CRM Dashboard API] Courier auto-sync warning:', syncErr)
-    }
-
-    // 5. Query latest Day Closeout to determine active shift
-    let recentDayCloseouts: any[] = []
-    let latestDayCloseout: any = null
-    try {
-      const { data: dbCloseouts } = await supabaseAdmin
-        .from('crm_day_closeouts')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10)
-      if (dbCloseouts && dbCloseouts.length > 0) {
-        recentDayCloseouts = dbCloseouts
-        latestDayCloseout = dbCloseouts[0]
-      }
-    } catch (coErr) {}
+    let recentDayCloseouts: any[] = closeoutsRes.data || []
+    let latestDayCloseout: any = recentDayCloseouts.length > 0 ? recentDayCloseouts[0] : null
 
     if (recentDayCloseouts.length === 0) {
       const localCo = getLocalDayCloseouts()
@@ -233,6 +197,10 @@ export async function GET() {
         latestDayCloseout = localCo[0]
       }
     }
+
+    const customersData = customersRes.data || []
+    const customerCount = customersData.length
+    const recentSettlements = recentSettlementsRes.data || []
 
     // Active shift boundary: ONLY resets when a Z-Report (day closeout) is executed
     const shiftStartIso = latestDayCloseout
@@ -264,11 +232,6 @@ export async function GET() {
       .filter(o => o.is_settled && !getOrderPaymentInfo(o).isPrepaid)
       .reduce((sum, o) => sum + (Number(o.total_price) || 0), 0)
 
-    // Active customers count and directory
-    const { data: customersData, count: customerCount } = await supabaseAdmin
-      .from('crm_customers')
-      .select('*, brands:last_brand_id(name)')
-      .order('created_at', { ascending: false })
 
     // Low stock count (stock_on_hand <= 10.0 or min_stock_alert)
     const lowStockCount = (products || []).filter(p => Number(p.stock_on_hand) <= (Number(p.min_stock_alert) || 10.0)).length
@@ -427,12 +390,6 @@ export async function GET() {
       }
     })
 
-    // Recent cash settlements (for live warehouse collection feed & alerts)
-    const { data: recentSettlements } = await supabaseAdmin
-      .from('cash_settlements')
-      .select('id, courier_id, settlement_date, gross_collected, courier_pay, bonus_amount, net_expected, amount_received, status, notes, created_at, crm_couriers(name, phone_number, telegram_id)')
-      .order('created_at', { ascending: false })
-      .limit(15)
 
     return NextResponse.json({
       metrics: {
