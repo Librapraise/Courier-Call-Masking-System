@@ -1956,12 +1956,12 @@ export default function GhostCrmDashboard() {
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                     {t.notes}
                   </label>
-                  <input
-                    type="text"
+                  <textarea
+                    rows={4}
                     value={dayCloseoutNotes}
                     onChange={e => setDayCloseoutNotes(e.target.value)}
                     placeholder={t.dayCloseoutNotesPlaceholder || 'הערות סיכום יום (אופציונלי)...'}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/40 resize-y leading-relaxed font-sans"
                   />
                 </div>
 

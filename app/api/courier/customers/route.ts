@@ -109,14 +109,31 @@ export async function GET(request: NextRequest) {
       })
 
       if (matchedCrmCourier) {
+        // Active shift boundary: ONLY fetch unsettled orders from the current shift
+        let latestCloseout: any = null
+        try {
+          const { data: dbCo } = await supabaseAdmin
+            .from('crm_day_closeouts')
+            .select('shift_end, created_at')
+            .order('shift_end', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          if (dbCo) latestCloseout = dbCo
+        } catch (coErr) {}
+
+        const shiftStartIso = latestCloseout
+          ? (latestCloseout.shift_end || latestCloseout.created_at)
+          : null
+
         // Fetch active crm_orders for this courier
-        const { data: activeOrders } = await supabaseAdmin
+        let activeOrdersQuery = supabaseAdmin
           .from('crm_orders')
           .select(`
             id,
             address,
             city,
             is_settled,
+            order_date,
             created_at,
             crm_customers (
               id,
@@ -127,6 +144,12 @@ export async function GET(request: NextRequest) {
           .eq('courier_id', matchedCrmCourier.id)
           .eq('is_settled', false)
           .order('created_at', { ascending: false })
+
+        if (shiftStartIso) {
+          activeOrdersQuery = activeOrdersQuery.gt('order_date', shiftStartIso)
+        }
+
+        const { data: activeOrders } = await activeOrdersQuery
 
         if (activeOrders && activeOrders.length > 0) {
           const { data: allCusts } = await supabaseAdmin

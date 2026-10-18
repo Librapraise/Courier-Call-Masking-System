@@ -1259,18 +1259,20 @@ export async function POST(req: Request) {
       const creditProviderBalance = totalBitCredit
       const totalOverallBusinessProfit = totalNetToSafe + creditProviderBalance
 
-      // 4. Mark all orders in this shift as settled
-      if (shiftStart) {
+      // 4. Mark all orders up to shift end as settled
+      await supabaseAdmin
+        .from('crm_orders')
+        .update({ is_settled: true })
+        .lte('order_date', shiftEnd)
+
+      // 4b. Clear all legacy courier customer assignments so couriers start fresh on new day
+      try {
         await supabaseAdmin
-          .from('crm_orders')
-          .update({ is_settled: true })
-          .gt('order_date', shiftStart)
-          .lte('order_date', shiftEnd)
-      } else {
-        await supabaseAdmin
-          .from('crm_orders')
-          .update({ is_settled: true })
-          .lte('order_date', shiftEnd)
+          .from('customers')
+          .delete()
+          .neq('id', '00000000-0000-0000-0000-000000000000')
+      } catch (custClearErr) {
+        console.warn('[DashboardAPI] Note on clearing courier customers on closeout:', custClearErr)
       }
 
       // Also create cash_settlements rows for any courier who had orders
@@ -1405,6 +1407,9 @@ export async function POST(req: Request) {
         `  ▫️ גביית מזומן פיזי משליחים: *₪${totalPhysicalCash.toLocaleString()}*\n` +
         `  ▫️ שולם מראש בביט / אשראי: *₪${totalBitCredit.toLocaleString()}*\n` +
         `▫️ סך עמלות שליחים ששולמו: *₪${totalCourierPay.toLocaleString()}*\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `📋 *פירוט מעטפות מזומן לגבייה מכל שליח:*\n\n` +
+        `${courierWarehouseCards}\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
         `💵 *סך נטו מזומן להפקדה בכספת:*\n` +
         `💰 *₪${totalNetToSafe.toLocaleString()}*\n` +
@@ -1415,10 +1420,7 @@ export async function POST(req: Request) {
         `🏦 *סה״כ רווח נקי כולל לעסק (כספת + ביט):*\n` +
         `💎 *₪${totalOverallBusinessProfit.toLocaleString()}*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `📋 *פירוט מעטפות מזומן לגבייה מכל שליח:*\n\n` +
-        `${courierWarehouseCards}\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━\n` +
-        (notes ? `📝 *הערות מנהל משמרת:* ${notes}\n\n` : '') +
+        (notes && notes.trim() ? `📝 *הערות מנהל משמרת:*\n${notes.trim()}\n\n━━━━━━━━━━━━━━━━━━━━━\n` : '') +
         `🔒 *חובה על המחסנאי לוודא קבלת כל המעטפות במזומן ונעילתן בכספת.*`
 
       // Message 2: To Accounting Manager (Full Financial Audit Report)
@@ -1432,6 +1434,9 @@ export async function POST(req: Request) {
         `  ▫️ תקבולים במזומן (שליחים): *₪${totalPhysicalCash.toLocaleString()}*\n` +
         `  ▫️ תקבולים בסליקה / ביט: *₪${totalBitCredit.toLocaleString()}*\n` +
         `▫️ הוצאות עמלות שליחים: *₪${totalCourierPay.toLocaleString()}*\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `👥 *פירוט הכנסות ועמלות לפי שליח:*\n\n` +
+        `${courierAccountantCards}\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
         `💵 *רווח נטו במזומן שהופקד לכספת:*\n` +
         `💰 *₪${totalNetToSafe.toLocaleString()}*\n` +
@@ -1442,10 +1447,7 @@ export async function POST(req: Request) {
         `🏦 *סה״כ רווח נקי כולל לעסק (מזומן + אשראי):*\n` +
         `💎 *₪${totalOverallBusinessProfit.toLocaleString()}*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `👥 *פירוט הכנסות ועמלות לפי שליח:*\n\n` +
-        `${courierAccountantCards}\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━\n` +
-        (notes ? `📝 *הערות מנהל:* ${notes}\n\n` : '') +
+        (notes && notes.trim() ? `📝 *הערות מנהל:*\n${notes.trim()}\n\n━━━━━━━━━━━━━━━━━━━━━\n` : '') +
         `✅ *סטטוס משמרת:* סגירת יום הושלמה בהצלחה. הקופה אופסה ליום חדש.`
 
       // Resolve recipient Telegram IDs
