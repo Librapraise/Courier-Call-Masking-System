@@ -1322,6 +1322,8 @@ export interface DayCloseoutRecord {
   total_courier_pay: number
   total_bonus: number
   net_to_safe: number
+  total_atm_code_cash?: number
+  total_bit_credit?: number
   courier_breakdown?: Array<{
     courier_id: string
     courier_name: string

@@ -276,7 +276,6 @@ export default function GhostCrmDashboard() {
   )
   const [parsedTestResult, setParsedTestResult] = useState<ParsedDeliveryOrder | null>(null)
   const [recentSettlements, setRecentSettlements] = useState<CashSettlementRecord[]>([])
-  const [dismissedSettlementIds, setDismissedSettlementIds] = useState<string[]>([])
 
   // Day Closeout (Z-Report) States
   const [recentDayCloseouts, setRecentDayCloseouts] = useState<DayCloseoutRecord[]>([])
@@ -656,20 +655,6 @@ export default function GhostCrmDashboard() {
     setUnmaskedPhones(prev => ({ ...prev, [id]: !prev[id] }))
   }
 
-  // Real-time Storekeeper Cash Collection Alert
-  const latestWarehouseSettlement = useMemo(() => {
-    if (!recentSettlements || recentSettlements.length === 0) return null
-    const todayIsoDate = getIsraelDateString()
-    return (
-      recentSettlements.find(s => {
-        if (dismissedSettlementIds.includes(s.id)) return false
-        const isToday = s.settlement_date === todayIsoDate || (s.created_at && s.created_at.startsWith(todayIsoDate))
-        const hasNetCash = Number(s.net_expected || s.amount_received || 0) > 0
-        return isToday && hasNetCash
-      }) || null
-    )
-  }, [recentSettlements, dismissedSettlementIds])
-
   // Brand Order Counts
   const brandOrderCounts = useMemo(() => {
     const map: Record<string, number> = {}
@@ -731,6 +716,7 @@ export default function GhostCrmDashboard() {
       cash_collected: number
       bit_collected: number
       crypto_collected: number
+      atm_collected: number
       courier_fee: number
       bonus: number
       net_to_safe: number
@@ -750,6 +736,7 @@ export default function GhostCrmDashboard() {
           cash_collected: 0,
           bit_collected: 0,
           crypto_collected: 0,
+          atm_collected: 0,
           courier_fee: 0,
           bonus: 0,
           net_to_safe: 0
@@ -763,11 +750,13 @@ export default function GhostCrmDashboard() {
       const physicalCash = payInfo.isPrepaid ? 0 : price
       const isBit = payInfo.paymentMethod === 'BIT'
       const isCrypto = payInfo.paymentMethod === 'CRYPTO'
+      const isAtm = payInfo.paymentMethod === 'ATM_CODE'
 
       entry.gross_collected += price
       entry.cash_collected += physicalCash
       entry.bit_collected += (isBit ? price : 0)
       entry.crypto_collected = (entry.crypto_collected || 0) + (isCrypto ? price : 0)
+      entry.atm_collected = (entry.atm_collected || 0) + (isAtm ? price : 0)
 
       const hasSettlements = settledPayByCourier.has(cId)
       if (cId !== 'unassigned') {
@@ -781,6 +770,7 @@ export default function GhostCrmDashboard() {
 
     let totalGross = 0
     let totalPhysicalCash = 0
+    let totalAtmCash = 0
     let totalBitOnly = 0
     let totalCrypto = 0
     let totalBitCredit = 0
@@ -797,6 +787,7 @@ export default function GhostCrmDashboard() {
       entry.net_to_safe = Math.max(0, entry.cash_collected - entry.courier_fee)
       totalGross += entry.gross_collected
       totalPhysicalCash += entry.cash_collected
+      totalAtmCash += (entry.atm_collected || 0)
       totalBitOnly += entry.bit_collected
       totalCrypto += (entry.crypto_collected || 0)
       totalBitCredit += (entry.bit_collected + (entry.crypto_collected || 0))
@@ -806,12 +797,13 @@ export default function GhostCrmDashboard() {
 
     const netToSafe = Math.max(0, totalPhysicalCash - totalCourierPay)
     const creditProviderBalance = totalBitCredit
-    const totalBusinessNet = netToSafe + creditProviderBalance
+    const totalBusinessNet = netToSafe + totalAtmCash + creditProviderBalance
 
     return {
       totalOrders: activeOrders.length,
       totalGross,
       totalPhysicalCash,
+      totalAtmCash,
       totalBitCredit,
       totalBitOnly,
       totalCrypto,
@@ -1819,7 +1811,7 @@ export default function GhostCrmDashboard() {
                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                 className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-4 overscroll-contain no-scrollbar"
               >
-                {/* Financial Overview Cards — 4-Card Responsive Grid */}
+                {/* Financial Overview Cards */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
                   <div className="p-3 sm:p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/70 dark:border-slate-800 space-y-1">
                     <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate block">
@@ -1868,10 +1860,30 @@ export default function GhostCrmDashboard() {
                       ₪{dayCloseoutPreview.netToSafe.toLocaleString()}
                     </p>
                     <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/70 font-medium truncate">
-                      {isRtl ? 'מזומן פיזי להפקדה' : 'Physical cash to vault'}
+                      {isRtl ? 'מעטפות מזומן משליחים' : 'Courier cash envelopes'}
                     </p>
                   </div>
                 </div>
+
+                {/* ATM Code Cash Card (If present in current shift) */}
+                {(dayCloseoutPreview.totalAtmCash || 0) > 0 && (
+                  <div className="p-3 sm:p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">🏧</span>
+                      <div>
+                        <span className="text-xs font-bold text-purple-900 dark:text-purple-300">
+                          {isRtl ? 'מזומן שנמשך בקוד משיכה (אצל מחסנאי)' : 'Cash Withdrawn via ATM Code (Warehouseman)'}
+                        </span>
+                        <p className="text-[10px] text-purple-700/80 dark:text-purple-400/80">
+                          {isRtl ? 'הכסף נמשך ישירות מכספומט ע״י המחסנאי (לא נגבה ע״י השליחים)' : 'Withdrawn from ATM by warehouseman (not collected by courier)'}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-lg font-black font-mono text-purple-700 dark:text-purple-400">
+                      ₪{(dayCloseoutPreview.totalAtmCash || 0).toLocaleString()}
+                    </span>
+                  </div>
+                )}
 
                 {/* Total Business Net Profit Summary Banner */}
                 <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-500/10 via-indigo-500/10 to-transparent border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1879,12 +1891,12 @@ export default function GhostCrmDashboard() {
                     <span className="text-lg">🏦</span>
                     <div>
                       <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                        {isRtl ? 'סה״כ רווח נקי כולל לעסק (כספת + ספק אשראי)' : 'Total Business Net Profit (Vault + Credit Provider)'}
+                        {isRtl ? 'סה״כ רווח נקי כולל לעסק' : 'Total Business Net Profit'}
                       </span>
                       <p className="text-[10px] text-slate-500 dark:text-slate-400">
                         {isRtl
-                          ? `₪${dayCloseoutPreview.netToSafe.toLocaleString()} מזומן בכספת + ₪${dayCloseoutPreview.totalBitCredit.toLocaleString()} שמורים אצל ספק האשראי`
-                          : `₪${dayCloseoutPreview.netToSafe.toLocaleString()} in safe + ₪${dayCloseoutPreview.totalBitCredit.toLocaleString()} held with credit provider`}
+                          ? `₪${dayCloseoutPreview.netToSafe.toLocaleString()} מעטפות שליחים${(dayCloseoutPreview.totalAtmCash || 0) > 0 ? ` + ₪${(dayCloseoutPreview.totalAtmCash || 0).toLocaleString()} מחסנאי` : ''} + ₪${dayCloseoutPreview.totalBitCredit.toLocaleString()} שמורים בספק אשראי`
+                          : `₪${dayCloseoutPreview.netToSafe.toLocaleString()} courier cash${(dayCloseoutPreview.totalAtmCash || 0) > 0 ? ` + ₪${(dayCloseoutPreview.totalAtmCash || 0).toLocaleString()} warehouseman` : ''} + ₪${dayCloseoutPreview.totalBitCredit.toLocaleString()} held with credit provider`}
                       </p>
                     </div>
                   </div>
@@ -2066,7 +2078,7 @@ export default function GhostCrmDashboard() {
             >
 
             {/* Financial Summary */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className={`grid grid-cols-1 ${Number(selectedCloseoutDetail.total_atm_code_cash || 0) > 0 ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-3`}>
               <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/70 dark:border-slate-800 space-y-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase">ברוטו שנגבה</span>
                 <p className="text-lg font-black font-mono text-slate-900 dark:text-white">
@@ -2076,6 +2088,16 @@ export default function GhostCrmDashboard() {
                   {selectedCloseoutDetail.total_orders} {isRtl ? 'משלוחים' : 'orders'}
                 </p>
               </div>
+
+              {Number(selectedCloseoutDetail.total_atm_code_cash || 0) > 0 && (
+                <div className="p-3.5 rounded-xl bg-purple-50/70 dark:bg-purple-950/20 border border-purple-200/70 dark:border-purple-900/40 space-y-1">
+                  <span className="text-[10px] font-bold text-purple-700 dark:text-purple-400 uppercase">🏧 קוד משיכה (מחסנאי)</span>
+                  <p className="text-lg font-black font-mono text-purple-600 dark:text-purple-400">
+                    ₪{Number(selectedCloseoutDetail.total_atm_code_cash || 0).toLocaleString()}
+                  </p>
+                  <p className="text-[10px] text-purple-600/70 font-medium">נמשך ישירות מכספומט</p>
+                </div>
+              )}
 
               <div className="p-3.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 space-y-1">
                 <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase">עמלות שליחים</span>
@@ -2143,8 +2165,8 @@ export default function GhostCrmDashboard() {
 
             {/* Notes if any */}
             {selectedCloseoutDetail.notes && (
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
-                <span className="font-bold text-slate-900 dark:text-white mr-1.5">הערות:</span>
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed font-sans">
+                <span className="font-bold text-slate-900 dark:text-white block mb-1.5">📝 הערות מנהל:</span>
                 {selectedCloseoutDetail.notes}
               </div>
             )}
@@ -2999,78 +3021,6 @@ export default function GhostCrmDashboard() {
           </div>
         </header>
 
-        {/* WAREHOUSE WORKER CASH COLLECTION NOTIFICATION BANNER */}
-        {latestWarehouseSettlement && (
-          <div
-            className="rounded-2xl p-4 sm:p-5 bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-indigo-500/15 border-2 border-emerald-500/40 dark:border-emerald-500/50 shadow-lg shadow-emerald-500/5 backdrop-blur-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all animate-in fade-in slide-in-from-top-2 duration-300"
-            dir={isRtl ? 'rtl' : 'ltr'}
-          >
-            <div className="flex items-start gap-3.5">
-              <div className="p-3 rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-600/30 shrink-0">
-                <WalletIcon className="w-6 h-6" />
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 text-[10px] font-black uppercase tracking-wider border border-emerald-300 dark:border-emerald-700">
-                    {isRtl ? '🔔 התראה למחסנאי — דרישת גביית מזומן!' : '🔔 Storekeeper Cash Handover Alert'}
-                  </span>
-                  <span className="text-[11px] text-slate-400 dark:text-slate-500 font-mono">
-                    {new Date(latestWarehouseSettlement.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white leading-tight">
-                  {isRtl ? (
-                    <>
-                      עליך לגבות כעת מהשליח{' '}
-                      <span className="text-emerald-600 dark:text-emerald-400 font-black underline decoration-emerald-500/50 underline-offset-4">
-                        {latestWarehouseSettlement.crm_couriers?.name || 'שליח'}
-                      </span>{' '}
-                      סך של{' '}
-                      <span className="font-mono text-xl text-emerald-600 dark:text-emerald-400 font-black">
-                        ₪{Number(latestWarehouseSettlement.net_expected || latestWarehouseSettlement.amount_received || 0).toLocaleString()}
-                      </span>{' '}
-                      במזומן!
-                    </>
-                  ) : (
-                    <>
-                      Collect{' '}
-                      <span className="font-mono text-xl text-emerald-600 dark:text-emerald-400 font-black">
-                        ₪{Number(latestWarehouseSettlement.net_expected || latestWarehouseSettlement.amount_received || 0).toLocaleString()}
-                      </span>{' '}
-                      in physical cash from courier{' '}
-                      <span className="text-emerald-600 dark:text-emerald-400 font-black underline decoration-emerald-500/50 underline-offset-4">
-                        {latestWarehouseSettlement.crm_couriers?.name || 'Courier'}
-                      </span>{' '}
-                      now!
-                    </>
-                  )}
-                </h3>
-                <p className="text-xs text-slate-600 dark:text-slate-300 font-medium">
-                  {latestWarehouseSettlement.notes || (isRtl ? 'סגירת סבב הושלמה במערכת. יש לקבל את מעטפת המזומן מהשליח ולהפקידה בכספת.' : 'Shift closeout completed. Collect envelope and deposit in vault.')}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 self-stretch md:self-auto justify-end shrink-0">
-              <button
-                type="button"
-                onClick={() => setActiveNav('settlements')}
-                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                <WalletIcon className="w-3.5 h-3.5" />
-                <span>{isRtl ? 'צפה ביומן קופת שליחים' : 'View Settlements'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setDismissedSettlementIds(prev => [...prev, latestWarehouseSettlement.id])}
-                className="p-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition cursor-pointer"
-                title={isRtl ? 'הסתר התראה' : 'Dismiss Alert'}
-              >
-                <XIcon className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* DEDICATED ROUTE VIEWS - EXPLICIT CONTENT PER NAVIGATION ROUTE */}
         {activeNav === 'dashboard' && (

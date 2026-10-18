@@ -1030,7 +1030,7 @@ export function OrderDraftModal({
   const [manualPrice, setManualPrice] = useState('')
   const [manualMenuItems, setManualMenuItems] = useState('')
   const [manualActualItems, setManualActualItems] = useState('')
-  const [manualPaymentMethod, setManualPaymentMethod] = useState<'CASH' | 'BIT' | 'CRYPTO' | 'CREDIT' | 'PREPAID'>('CASH')
+  const [manualPaymentMethod, setManualPaymentMethod] = useState<'CASH' | 'BIT' | 'CRYPTO' | 'CREDIT' | 'PREPAID' | 'ATM_CODE'>('CASH')
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1377,6 +1377,7 @@ export function OrderDraftModal({
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 cursor-pointer"
                 >
                   <option value="CASH">{isRtl ? '💵 מזומן — גבייה מלאה ע״י שליח' : '💵 Cash — Full collect by courier'}</option>
+                  <option value="ATM_CODE">{isRtl ? '🏧 קוד משיכה — נמשך ע״י מחסנאי (0₪ לגבייה משליח)' : '🏧 ATM Code — Warehouseman withdraws (₪0 collect by courier)'}</option>
                   <option value="BIT">{isRtl ? '📱 ביט — שולם מראש (0₪ לגבייה משליח)' : '📱 Bit — Prepaid (₪0 to collect)'}</option>
                   <option value="CRYPTO">{isRtl ? '🪙 קריפטו — שולם מראש (0₪ לגבייה משליח)' : '🪙 Crypto — Prepaid (₪0 to collect)'}</option>
                   <option value="CREDIT">{isRtl ? '💳 כרטיס אשראי — שולם מראש (0₪ לגבייה משליח)' : '💳 Credit Card — Prepaid (₪0 to collect)'}</option>

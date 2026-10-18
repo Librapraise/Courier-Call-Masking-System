@@ -111,6 +111,46 @@ export async function POST(req: NextRequest) {
               allDeductions.push({ ...d })
             }
           }
+
+          // Instant notification to warehouseman for ATM Cash Withdrawal Codes
+          if (parsed.paymentMethod === 'ATM_CODE') {
+            const warehouseTelegramIds = new Set<string>()
+            const whEnv = (process.env.WAREHOUSE_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
+            whEnv.forEach(id => warehouseTelegramIds.add(id))
+            const adminEnv = (process.env.ALLOWED_TELEGRAM_ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
+            adminEnv.forEach(id => warehouseTelegramIds.add(id))
+
+            const botToken = process.env.TELEGRAM_BOT_TOKEN || ''
+            if (botToken && warehouseTelegramIds.size > 0) {
+              const atmAlertText =
+                `🏧 *התראת קוד משיכה מכספומט למחסנאי!*\n` +
+                `━━━━━━━━━━━━━━━━━━━━━\n` +
+                `📍 *כתובת לקוח:* ${parsed.customerName}\n` +
+                `🏙️ *עיר:* ${parsed.city}\n` +
+                `💰 *סכום למשיכה:* *₪${parsed.totalPrice.toLocaleString()}*\n` +
+                `📱 *טלפון:* \`${parsed.phoneNumber}\`\n` +
+                (parsed.telegramHandle ? `👤 *טלגרם:* ${parsed.telegramHandle}\n` : '') +
+                `🏷️ *מותג:* ${parsed.brand}\n` +
+                `━━━━━━━━━━━━━━━━━━━━━\n` +
+                `📝 *תוכן ההזמנה והקוד:*\n` +
+                `${parsed.rawText}\n` +
+                `━━━━━━━━━━━━━━━━━━━━━\n` +
+                `⚡ *הנחיה למחסנאי:* יש למשוך את הכסף מהכספומט ולנעול בכספת.\n` +
+                `🛵 *לשליח שובצה גבייה:* *0₪* (שולם בקוד).`
+
+              for (const whId of warehouseTelegramIds) {
+                try {
+                  await sendTelegramMessage(botToken, {
+                    chat_id: whId,
+                    parse_mode: 'Markdown',
+                    text: atmAlertText
+                  })
+                } catch (whErr) {
+                  console.warn('[TelegramWebhook] Error sending ATM code alert to warehouseman:', whErr)
+                }
+              }
+            }
+          }
         }
       }
     }

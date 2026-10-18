@@ -9,7 +9,7 @@ export interface ParsedItemDeduction {
   matchedProductCategory?: string
 }
 
-export type PaymentMethod = 'CASH' | 'BIT' | 'CRYPTO' | 'CREDIT' | 'PREPAID'
+export type PaymentMethod = 'CASH' | 'BIT' | 'CRYPTO' | 'CREDIT' | 'PREPAID' | 'ATM_CODE'
 
 export interface ParsedDeliveryOrder {
   customerName: string       // Delivery address used as customer identity (e.g. "מרקו לויז - הנשיאים 57 פתח תקווה")
@@ -95,6 +95,10 @@ export function extractPaymentDetails(text: string, totalPrice: number): {
 } {
   const lower = (text || '').toLowerCase()
 
+  // Match ATM Cash Withdrawal Code ("קוד משיכה" / "משלם בקוד משיכה" / "קוד כספומט" / "במשיכה")
+  const hasAtmCode =
+    /(?:קוד\s*משיכה|בקוד\s*משיכה|משל[םמ]?(?:ת|ים)?\s*(?:ב?קוד(?:\s*משיכה)?|במשיכה)|שולם\s*ב?קוד|הועבר\s*ב?קוד|משיכה\s*ללא\s*כרטיס|קוד\s*כספומט|במשיכה)/i.test(lower)
+
   // Match Crypto phrases
   const hasCrypto =
     /(?:שולם\s+ב?קריפטו|הועבר\s+ב?קריפטו|סליקה\s+ב?קריפטו|משלמ?ת?\s+ב?קריפטו|(?:\d+\s*(?:₪|ש"ח|שח)?\s*ב?קריפטו)|(?:^|\s)בקריפטו(?:$|\s|[.,!‼️?]+)|(?:^|\s)קריפטו(?:$|\s|[.,!‼️?]+)|paid\s+(?:via|with|by|in)\s+crypto|(?:^|\s)crypto(?:$|\s|[.,!‼️?]+)|(?:שולם\s+ב?|הועבר\s+ב?)?(?:ביטקוין|בביטקוין|bitcoin|usdt|btc))/i.test(lower)
@@ -110,12 +114,22 @@ export function extractPaymentDetails(text: string, totalPrice: number): {
 
   // Match explicit prepaid / zero collect phrases
   const hasPrepaid =
+    hasAtmCode ||
     hasCrypto ||
     hasBit ||
     hasCredit ||
     /(?:שולם\s+מראש|שולם\s+קודם|prepaid|paid\s+in\s+advance|לגבות\s*:\s*0|לגבות\s+0|0\s*₪?\s*לגב(?:יי)?ה)/i.test(lower) ||
     /(?:^|\s)0\s*(?:₪|ש"ח|שח)\b/.test(lower) ||
     totalPrice === 0
+
+  if (hasAtmCode) {
+    return {
+      paymentMethod: 'ATM_CODE',
+      isPrepaid: true,
+      cashToCollect: 0,
+      paymentLabel: 'שולם בקוד משיכה (אצל מחסנאי)'
+    }
+  }
 
   if (hasCrypto) {
     return {
@@ -196,12 +210,18 @@ export function getOrderPaymentInfo(order: {
 
   const isPrepaidFlag =
     effectiveIsPrepaid ||
+    effectivePaymentMethod === 'ATM_CODE' ||
     effectivePaymentMethod === 'CRYPTO' ||
     effectivePaymentMethod === 'BIT' ||
     effectivePaymentMethod === 'CREDIT' ||
     effectivePaymentMethod === 'PREPAID'
 
   const lower = rawAndNotes.toLowerCase()
+
+  // Match ATM Cash Withdrawal Code ("קוד משיכה" / "משלם בקוד משיכה" / "קוד כספומט" / "במשיכה")
+  const hasAtmCode =
+    effectivePaymentMethod === 'ATM_CODE' ||
+    /(?:קוד\s*משיכה|בקוד\s*משיכה|משל[םמ]?(?:ת|ים)?\s*(?:ב?קוד(?:\s*משיכה)?|במשיכה)|שולם\s*ב?קוד|הועבר\s*ב?קוד|משיכה\s*ללא\s*כרטיס|קוד\s*כספומט|במשיכה)/i.test(lower)
 
   const hasCrypto =
     effectivePaymentMethod === 'CRYPTO' ||
@@ -217,6 +237,7 @@ export function getOrderPaymentInfo(order: {
 
   const hasPrepaid =
     isPrepaidFlag ||
+    hasAtmCode ||
     hasCrypto ||
     hasBit ||
     hasCredit ||
@@ -225,7 +246,9 @@ export function getOrderPaymentInfo(order: {
     /(?:^|\s)0\s*(?:₪|ש"ח|שח)\b/.test(lower) ||
     Number(order.total_price || 0) === 0
 
-  const method: PaymentMethod = hasCrypto
+  const method: PaymentMethod = hasAtmCode
+    ? 'ATM_CODE'
+    : hasCrypto
     ? 'CRYPTO'
     : hasBit
     ? 'BIT'
@@ -239,7 +262,9 @@ export function getOrderPaymentInfo(order: {
   const totalPrice = Number(order.total_price || 0)
   const cashToCollect = isPrepaid ? 0 : totalPrice
 
-  const labelHe = hasCrypto
+  const labelHe = hasAtmCode
+    ? 'שולם בקוד משיכה (אצל מחסנאי)'
+    : hasCrypto
     ? 'שולם בקריפטו'
     : hasBit
     ? 'שולם בביט'
@@ -249,7 +274,9 @@ export function getOrderPaymentInfo(order: {
     ? 'שולם מראש'
     : 'מזומן'
 
-  const badgeText = hasCrypto
+  const badgeText = hasAtmCode
+    ? '🏧 קוד משיכה'
+    : hasCrypto
     ? '🪙 קריפטו'
     : hasBit
     ? '📱 ביט'
@@ -309,8 +336,8 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
   if (brandLineIndex !== -1 && brandLineIndex < rawLines.length - 1) {
     for (let i = brandLineIndex + 1; i < rawLines.length; i++) {
       const line = rawLines[i]
-      // Payment indicators (e.g. "שולם בקריפטו", "שולם בביט") are never warehouse deductions
-      const isPaymentLine = /(?:שולם|הועבר|סליקה|משלמ?ת?|קריפטו|crypto|ביט|bit|אשראי|credit|prepaid)/i.test(line) &&
+      // Payment indicators (e.g. "שולם בקריפטו", "שולם בביט", "משלם בקוד משיכה") are never warehouse deductions
+      const isPaymentLine = /(?:שולם|הועבר|סליקה|משל[םמ]?(?:ת|ים)?|קריפטו|crypto|ביט|bit|אשראי|credit|prepaid|קוד\s*משיכה|בקוד|במשיכה|כספומט)/i.test(line) &&
         !/(?:ביטים|בביטים)/i.test(line)
       if (!isPaymentLine) {
         trailingDeductionLines.push(line)
@@ -365,8 +392,9 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
     else if (line.includes('\\')) separator = '\\'
     else {
       // Check if an emoji is used as a separator between menu item and warehouse strain
+      // Exclude regional indicator flags (e.g. 🇮🇱, 🇺🇸) which indicate strain origin!
       const emojiMatch = line.match(/\s*([\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\uFE0F\p{Extended_Pictographic}])\s*/u)
-      if (emojiMatch && emojiMatch[1]) {
+      if (emojiMatch && emojiMatch[1] && !/[\u{1F1E6}-\u{1F1FF}]/u.test(emojiMatch[1])) {
         const candidateSep = emojiMatch[1]
         const testParts = line.split(candidateSep)
         if (testParts.length >= 2 && testParts[0].trim().length > 0 && testParts[1].trim().length > 0) {
@@ -416,11 +444,11 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
       }
     } else {
       // Check if this line is an item line (not address, phone, price, handle, tier, brand, or payment line)
-      const isPaymentLine = /(?:שולם|הועבר|סליקה|משלמ?ת?|קריפטו|crypto|ביט|bit|אשראי|credit|prepaid)/i.test(line) &&
+      const isPaymentLine = /(?:שולם|הועבר|סליקה|משלמ?ת?|קריפטו|crypto|ביט|bit|אשראי|credit|prepaid|קוד\s+משיכה|כספומט|במשיכה)/i.test(line) &&
         !/(?:ביטים|בביטים)/i.test(line)
 
       const isBrandLine = Boolean(matchBrand(line))
-      const isVerificationLine = /(?:אימות|אושר|אישור\s*הזמנה|מאושר|בדיקה)/i.test(line)
+      const isVerificationLine = /(?:אימות|אושר|אישור\s*הזמנה|מאושר|בדיקה|מנהל\s+גיבוי\s+הזמנות)/i.test(line)
 
       const isNotMeta = !line.match(phoneRegex) &&
         !line.match(/@([A-Za-z0-9_]+)/) &&
@@ -483,6 +511,17 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
 
   // Determine payment method and cash to collect
   const paymentDetails = extractPaymentDetails(cleanRaw, totalPrice)
+
+  // If customer paid via ATM withdrawal code and specified explicit amount (e.g. "משלם בקוד משיכה 1300 ‼️")
+  if (paymentDetails.paymentMethod === 'ATM_CODE') {
+    const atmMatch = cleanRaw.match(/(?:משלמ?ת?\s+ב?קוד\s+משיכה|קוד\s+משיכה|במשיכה|קוד\s+כספומט)\s*(\d[\d,]*)/i)
+    if (atmMatch) {
+      const explicitAtmPrice = parseFloat(atmMatch[1].replace(/,/g, ''))
+      if (!isNaN(explicitAtmPrice) && explicitAtmPrice > 0) {
+        totalPrice = explicitAtmPrice
+      }
+    }
+  }
 
   return {
     customerName,

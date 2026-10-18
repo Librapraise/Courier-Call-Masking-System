@@ -25,6 +25,11 @@ export interface CustomerPublic {
   is_active: boolean
   is_completed: boolean
   created_at: string
+  payment_badge?: {
+    text: string
+    type: string
+    amountToCollect: number
+  }
 }
 
 export interface Feedback {

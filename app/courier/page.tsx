@@ -239,7 +239,22 @@ export default function CourierPage() {
                 {customers.map((customer) => (
                   <tr key={customer.id}>
                     <td className="px-4 sm:px-6 py-4 text-sm font-medium text-gray-900">
-                      {customer.name}
+                      <div>{customer.name}</div>
+                      {customer.payment_badge && (
+                        <div className="mt-1">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
+                              customer.payment_badge.type === 'atm_code'
+                                ? 'bg-purple-100 text-purple-900 border border-purple-300'
+                                : customer.payment_badge.type === 'cash'
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                : 'bg-blue-100 text-blue-900 border border-blue-300'
+                            }`}
+                          >
+                            {customer.payment_badge.text}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 sm:px-6 py-4 text-right text-sm">
                       <div className="flex flex-row justify-end items-center gap-2">

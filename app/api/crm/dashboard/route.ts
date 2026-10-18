@@ -696,7 +696,7 @@ export async function POST(req: Request) {
         if (assignedCourier?.telegram_id) {
           try {
             const payInfo = getOrderPaymentInfo(updatedOrder)
-            const payIcon = payInfo.paymentMethod === 'CRYPTO' ? '🪙' : payInfo.paymentMethod === 'BIT' ? '📱' : '💳'
+            const payIcon = payInfo.paymentMethod === 'ATM_CODE' ? '🏧' : payInfo.paymentMethod === 'CRYPTO' ? '🪙' : payInfo.paymentMethod === 'BIT' ? '📱' : '💳'
             const priceDisplay = payInfo.isPrepaid
               ? `0₪ מזומן (${payInfo.labelHe} ${payIcon})`
               : `₪${Number(updatedOrder.total_price || 0).toLocaleString()} מזומן`
@@ -1154,6 +1154,7 @@ export async function POST(req: Request) {
         gross_collected: number
         cash_collected: number
         bit_collected: number
+        atm_code_collected?: number
         standard_count: number
         bat_yam_count: number
         courier_fee: number
@@ -1176,6 +1177,7 @@ export async function POST(req: Request) {
             gross_collected: 0,
             cash_collected: 0,
             bit_collected: 0,
+            atm_code_collected: 0,
             standard_count: 0,
             bat_yam_count: 0,
             courier_fee: 0,
@@ -1188,13 +1190,18 @@ export async function POST(req: Request) {
         entry.orders_count += 1
         const price = Number(o.total_price) || 0
         const payInfo = getOrderPaymentInfo(o)
-        const isPrepaidBit = payInfo.isPrepaid
-        const physicalCash = isPrepaidBit ? 0 : price
-        const bitAmount = isPrepaidBit ? price : 0
+        const isAtmCode = payInfo.paymentMethod === 'ATM_CODE'
+        const isBitCredit = payInfo.isPrepaid && !isAtmCode
+        const physicalCash = payInfo.isPrepaid ? 0 : price
 
         entry.gross_collected += price
         entry.cash_collected += physicalCash
-        entry.bit_collected += bitAmount
+        if (isBitCredit) {
+          entry.bit_collected += price
+        }
+        if (isAtmCode) {
+          (entry as any).atm_code_collected = ((entry as any).atm_code_collected || 0) + price
+        }
 
         const hasSettlements = settledPayByCourier.has(cId)
         if (cId !== 'unassigned') {
@@ -1234,21 +1241,23 @@ export async function POST(req: Request) {
 
       let totalGross = 0
       let totalPhysicalCash = 0
+      let totalAtmCodeCash = 0
       let totalBitCredit = 0
       let totalCourierPay = 0
       let totalBonus = 0
       const courierBreakdown: any[] = []
 
-      courierMap.forEach((entry) => {
+      courierMap.forEach((entry: any) => {
         const settledInfo = settledPayByCourier.get(entry.courier_id)
         if (settledInfo) {
           entry.courier_fee += settledInfo.totalPay
           entry.bonus = settledInfo.totalBonus
         }
-        // The courier only deposits physical cash in the safe! Bit was collected directly by provider.
+        // The courier only deposits physical cash in the safe!
         entry.net_to_safe = Math.max(0, entry.cash_collected - entry.courier_fee)
         totalGross += entry.gross_collected
         totalPhysicalCash += entry.cash_collected
+        totalAtmCodeCash += (entry.atm_code_collected || 0)
         totalBitCredit += entry.bit_collected
         totalCourierPay += entry.courier_fee
         totalBonus += (entry.bonus || 0)
@@ -1257,7 +1266,7 @@ export async function POST(req: Request) {
 
       const totalNetToSafe = Math.max(0, totalPhysicalCash - totalCourierPay)
       const creditProviderBalance = totalBitCredit
-      const totalOverallBusinessProfit = totalNetToSafe + creditProviderBalance
+      const totalOverallBusinessProfit = totalNetToSafe + totalAtmCodeCash + creditProviderBalance
 
       // 4. Mark all orders up to shift end as settled
       await supabaseAdmin
@@ -1265,14 +1274,14 @@ export async function POST(req: Request) {
         .update({ is_settled: true })
         .lte('order_date', shiftEnd)
 
-      // 4b. Clear all legacy courier customer assignments so couriers start fresh on new day
+      // 4b. Deactivate all legacy courier customer assignments so couriers start fresh with a clean list
       try {
         await supabaseAdmin
           .from('customers')
-          .delete()
-          .neq('id', '00000000-0000-0000-0000-000000000000')
+          .update({ is_active: false, assigned_courier_id: null })
+          .eq('is_active', true)
       } catch (custClearErr) {
-        console.warn('[DashboardAPI] Note on clearing courier customers on closeout:', custClearErr)
+        console.warn('[DashboardAPI] Note on deactivating courier customers on closeout:', custClearErr)
       }
 
       // Also create cash_settlements rows for any courier who had orders
@@ -1303,6 +1312,7 @@ export async function POST(req: Request) {
         total_orders: totalOrders,
         gross_collected: totalGross,
         total_physical_cash: totalPhysicalCash,
+        total_atm_code_cash: totalAtmCodeCash,
         total_bit_credit: totalBitCredit,
         credit_provider_balance: creditProviderBalance,
         total_courier_pay: totalCourierPay,
@@ -1369,10 +1379,12 @@ export async function POST(req: Request) {
           const bonusStr = c.bonus > 0 ? `(כולל ₪${c.bonus.toLocaleString()} בונוס)` : ''
           const detailsStr = [batYamStr, bonusStr].filter(Boolean).join(' ')
           const bitNote = c.bit_collected > 0 ? `  ▫️ שולם בביט: ₪${c.bit_collected.toLocaleString()} (בסליקה)\n` : ''
+          const atmNote = (c.atm_code_collected || 0) > 0 ? `  ▫️ שולם בקוד משיכה: ₪${c.atm_code_collected.toLocaleString()} (נמשך ע״י מחסנאי)\n` : ''
           return (
             `🛵 *${c.courier_name}* • ${c.orders_count} משלוחים${detailsStr ? ` ${detailsStr}` : ''}\n` +
             `  ▫️ גבייה ברוטו: ₪${c.gross_collected.toLocaleString()}\n` +
             bitNote +
+            atmNote +
             `  ▫️ מזומן פיזי שנגבה: ₪${c.cash_collected.toLocaleString()}\n` +
             `  ▫️ עמלת שליח: ₪${c.courier_fee.toLocaleString()}\n` +
             `  📥 *מעטפה לגבייה לכספת: ₪${c.net_to_safe.toLocaleString()}*`
@@ -1386,10 +1398,12 @@ export async function POST(req: Request) {
           const batYamStr = c.bat_yam_count > 0 ? ` (כולל ${c.bat_yam_count} בת ים × ₪50)` : ''
           const bonusStr = c.bonus > 0 ? ` (כולל ₪${c.bonus.toLocaleString()} בונוס)` : ''
           const bitNote = c.bit_collected > 0 ? `  ▫️ מתוכם בביט/סליקה: ₪${c.bit_collected.toLocaleString()}\n` : ''
+          const atmNote = (c.atm_code_collected || 0) > 0 ? `  ▫️ מתוכם בקוד משיכה: ₪${c.atm_code_collected.toLocaleString()} (אצל מחסנאי)\n` : ''
           return (
             `🛵 *${c.courier_name}* • ${c.orders_count} משלוחים\n` +
             `  ▫️ מחזור ברוטו: ₪${c.gross_collected.toLocaleString()}\n` +
             bitNote +
+            atmNote +
             `  ▫️ עמלת שליח: ₪${c.courier_fee.toLocaleString()}${batYamStr}${bonusStr}\n` +
             `  💵 *נטו מזומן לכספת: ₪${c.net_to_safe.toLocaleString()}*`
           )
@@ -1405,23 +1419,32 @@ export async function POST(req: Request) {
         `▫️ סה״כ משלוחים שסופקו: *${totalOrders}*\n` +
         `▫️ מחזור מכירות כללי: *₪${totalGross.toLocaleString()}*\n` +
         `  ▫️ גביית מזומן פיזי משליחים: *₪${totalPhysicalCash.toLocaleString()}*\n` +
+        (totalAtmCodeCash > 0 ? `  ▫️ מזומן שנמשך בקוד כספומט (אצל מחסנאי): *₪${totalAtmCodeCash.toLocaleString()}*\n` : '') +
         `  ▫️ שולם מראש בביט / אשראי: *₪${totalBitCredit.toLocaleString()}*\n` +
         `▫️ סך עמלות שליחים ששולמו: *₪${totalCourierPay.toLocaleString()}*\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `📋 *פירוט מעטפות מזומן לגבייה מכל שליח:*\n\n` +
-        `${courierWarehouseCards}\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `💵 *סך נטו מזומן להפקדה בכספת:*\n` +
+        `💵 *סך נטו מזומן ממעטפות שליחים:*\n` +
         `💰 *₪${totalNetToSafe.toLocaleString()}*\n` +
+        (totalAtmCodeCash > 0 ? (
+          `━━━━━━━━━━━━━━━━━━━━━\n` +
+          `🏧 *מזומן שנמשך בקוד משיכה (אצל המחסנאי):*\n` +
+          `💰 *₪${totalAtmCodeCash.toLocaleString()}*\n` +
+          `━━━━━━━━━━━━━━━━━━━━━\n` +
+          `🔒 *סה״כ מזומן פיזי בכספת (שליחים + מחסנאי):*\n` +
+          `💰 *₪${(totalNetToSafe + totalAtmCodeCash).toLocaleString()}*\n`
+        ) : '') +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
         `📱 *יתרה אצל ספק אשראי / ביט (טרם נמשך):*\n` +
         `💳 *₪${totalBitCredit.toLocaleString()}*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `🏦 *סה״כ רווח נקי כולל לעסק (כספת + ביט):*\n` +
+        `🏦 *סה״כ רווח נקי כולל לעסק:*\n` +
         `💎 *₪${totalOverallBusinessProfit.toLocaleString()}*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `📋 *פירוט מעטפות מזומן לגבייה מכל שליח:*\n\n` +
+        `${courierWarehouseCards}\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
         (notes && notes.trim() ? `📝 *הערות מנהל משמרת:*\n${notes.trim()}\n\n━━━━━━━━━━━━━━━━━━━━━\n` : '') +
-        `🔒 *חובה על המחסנאי לוודא קבלת כל המעטפות במזומן ונעילתן בכספת.*`
+        `🔒 *חובה על המחסנאי לוודא קבלת כל המעטפות במזומן והפקדת כל הכספים (כולל משיכות כספומט) בכספת.*`
 
       // Message 2: To Accounting Manager (Full Financial Audit Report)
       const accountantMessage =
@@ -1432,20 +1455,29 @@ export async function POST(req: Request) {
         `▫️ סה״כ הזמנות שנמסרו: *${totalOrders}*\n` +
         `▫️ מחזור מכירות כולל: *₪${totalGross.toLocaleString()}*\n` +
         `  ▫️ תקבולים במזומן (שליחים): *₪${totalPhysicalCash.toLocaleString()}*\n` +
+        (totalAtmCodeCash > 0 ? `  ▫️ תקבולים בקוד משיכה (מחסנאי): *₪${totalAtmCodeCash.toLocaleString()}*\n` : '') +
         `  ▫️ תקבולים בסליקה / ביט: *₪${totalBitCredit.toLocaleString()}*\n` +
         `▫️ הוצאות עמלות שליחים: *₪${totalCourierPay.toLocaleString()}*\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `👥 *פירוט הכנסות ועמלות לפי שליח:*\n\n` +
-        `${courierAccountantCards}\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `💵 *רווח נטו במזומן שהופקד לכספת:*\n` +
+        `💵 *נטו מזומן ממעטפות שליחים:*\n` +
         `💰 *₪${totalNetToSafe.toLocaleString()}*\n` +
+        (totalAtmCodeCash > 0 ? (
+          `━━━━━━━━━━━━━━━━━━━━━\n` +
+          `🏧 *מזומן שנמשך בקוד משיכה (אצל מחסנאי):*\n` +
+          `💰 *₪${totalAtmCodeCash.toLocaleString()}*\n` +
+          `━━━━━━━━━━━━━━━━━━━━━\n` +
+          `🔒 *סה״כ מזומן פיזי בכספת:*\n` +
+          `💰 *₪${(totalNetToSafe + totalAtmCodeCash).toLocaleString()}*\n`
+        ) : '') +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
         `📱 *יתרה לגבייה מספק אשראי / ביט:*\n` +
         `💳 *₪${totalBitCredit.toLocaleString()}*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `🏦 *סה״כ רווח נקי כולל לעסק (מזומן + אשראי):*\n` +
+        `🏦 *סה״כ רווח נקי כולל לעסק:*\n` +
         `💎 *₪${totalOverallBusinessProfit.toLocaleString()}*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `👥 *פירוט הכנסות ועמלות לפי שליח:*\n\n` +
+        `${courierAccountantCards}\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
         (notes && notes.trim() ? `📝 *הערות מנהל:*\n${notes.trim()}\n\n━━━━━━━━━━━━━━━━━━━━━\n` : '') +
         `✅ *סטטוס משמרת:* סגירת יום הושלמה בהצלחה. הקופה אופסה ליום חדש.`
@@ -1877,6 +1909,34 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: delErr.message }, { status: 400 })
       }
 
+      // 4b. Deactivate from legacy customers table so courier screen immediately clears it
+      try {
+        if (order.address) {
+          await supabaseAdmin
+            .from('customers')
+            .update({ is_active: false, assigned_courier_id: null })
+            .eq('name', order.address)
+        }
+        if (order.customer_id) {
+          const { data: crmCust } = await supabaseAdmin
+            .from('crm_customers')
+            .select('phone_number')
+            .eq('id', order.customer_id)
+            .maybeSingle()
+          if (crmCust?.phone_number) {
+            const cleanDigits = crmCust.phone_number.replace(/\D/g, '')
+            if (cleanDigits.length >= 7) {
+              await supabaseAdmin
+                .from('customers')
+                .update({ is_active: false, assigned_courier_id: null })
+                .ilike('phone_number', `%${cleanDigits.slice(-7)}%`)
+            }
+          }
+        }
+      } catch (cDeactErr) {
+        console.warn('[DELETE_ORDER] Note on deactivating customer:', cDeactErr)
+      }
+
       // 5. Notify assigned courier via Telegram if order is cancelled
       if (order.courier_id) {
         try {
@@ -2130,7 +2190,7 @@ export async function POST(req: Request) {
               const oldPriceNum = Number(currentOrder.total_price || 0)
               const newPriceNum = Number(updatedOrder.total_price || 0)
               const payInfo = getOrderPaymentInfo(updatedOrder)
-              const payIcon = payInfo.paymentMethod === 'CRYPTO' ? '🪙' : payInfo.paymentMethod === 'BIT' ? '📱' : '💳'
+              const payIcon = payInfo.paymentMethod === 'ATM_CODE' ? '🏧' : payInfo.paymentMethod === 'CRYPTO' ? '🪙' : payInfo.paymentMethod === 'BIT' ? '📱' : '💳'
               const priceDisplay = payInfo.isPrepaid
                 ? `0₪ מזומן (${payInfo.labelHe} ${payIcon})`
                 : `₪${newPriceNum.toLocaleString()} מזומן`
