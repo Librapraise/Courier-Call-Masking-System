@@ -539,8 +539,9 @@ export async function POST(req: Request) {
     }
 
     if (action === 'BATCH_DEPLETE_INVENTORY') {
-      const { rawMessage, customCosts } = body
-      if (!rawMessage || typeof rawMessage !== 'string' || !rawMessage.trim()) {
+      const { customCosts } = body
+      const rawMessage = ((body.rawMessage || body.text || '') as string).trim()
+      if (!rawMessage) {
         return NextResponse.json({ error: 'Missing depletion message content' }, { status: 400 })
       }
 
@@ -2186,30 +2187,7 @@ export async function POST(req: Request) {
         // Remove previous transactions for this order
         await supabaseAdmin.from('inventory_transactions').delete().eq('order_id', orderId)
 
-        // B. Apply new deductions
-        for (const d of parsed.deductions) {
-          const { data: prod } = await supabaseAdmin
-            .from('products')
-            .select('id, name, unit, stock_on_hand')
-            .eq('name', d.warehouseProductName)
-            .maybeSingle()
-
-          if (prod) {
-            const newStock = Math.max(0, Number(prod.stock_on_hand || 0) - Math.abs(d.quantity))
-            await supabaseAdmin.from('products').update({
-              stock_on_hand: newStock,
-              updated_at: new Date().toISOString()
-            }).eq('id', prod.id)
-
-            await supabaseAdmin.from('inventory_transactions').insert({
-              product_id: prod.id,
-              order_id: orderId,
-              quantity: -Math.abs(d.quantity),
-              reason: 'DISPATCH_DEDUCTION',
-              notes: `Updated deduction from edited order ${orderId}`
-            })
-          }
-        }
+        // Deductions are managed exclusively at end-of-day bulk depletion, not per-order.
       } else if (manualFields) {
         // Manual field override (e.g. changing price or address directly)
         if (manualFields.address !== undefined) newAddress = manualFields.address

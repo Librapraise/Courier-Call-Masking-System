@@ -249,49 +249,9 @@ export async function ingestParsedDelivery(parsed: ParsedDeliveryOrder): Promise
 
     const orderId = newOrder.id
 
-    // 4. Process Inventory Deductions using cached product catalog
+    // 4. Per user requirement: individual shipping lines do NOT deduct inventory!
+    // Inventory calculation and deduction happens exclusively at the end of the day when submitting the consolidated list.
     const executedDeductions: { productName: string; quantity: number; unit: string }[] = []
-
-    if (parsed.deductions.length > 0) {
-      const prodMap = await getCachedProducts()
-
-      const deductionPromises = parsed.deductions.map(async (d) => {
-        const prod = prodMap.get(d.warehouseProductName)
-        if (!prod) return null
-
-        const currentStock = prod.stock_on_hand
-        const updatedStock = Math.max(0, currentStock - Math.abs(d.quantity))
-        prod.stock_on_hand = updatedStock // update in-memory cache instantly
-
-        await Promise.all([
-          supabaseAdmin.from('inventory_transactions').insert({
-            product_id: prod.id,
-            order_id: orderId,
-            quantity: -Math.abs(d.quantity),
-            reason: 'DISPATCH_DEDUCTION',
-            notes: `Deduction from order ${orderId}`
-          }),
-          supabaseAdmin
-            .from('products')
-            .update({
-              stock_on_hand: updatedStock,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', prod.id)
-        ])
-
-        return {
-          productName: prod.name,
-          quantity: d.quantity,
-          unit: prod.unit
-        }
-      })
-
-      const results = await Promise.all(deductionPromises)
-      results.forEach(r => {
-        if (r) executedDeductions.push(r)
-      })
-    }
 
     // Invalidate dashboard memory cache so the very next CRM poll or fetch sees this instantly!
     invalidateDashboardCache()

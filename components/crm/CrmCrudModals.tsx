@@ -1308,15 +1308,6 @@ export function OrderDraftModal({
                     </p>
                   </div>
 
-                  <div>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                      📦 {isRtl ? 'פריטים שיורדים מהמחסן' : 'Warehouse Stock Deductions'}
-                    </span>
-                    <p className="text-emerald-700 dark:text-emerald-400 font-bold text-[11px] bg-emerald-50/60 dark:bg-emerald-950/40 p-1.5 rounded-lg border border-emerald-200/50 dark:border-emerald-900/40">
-                      {liveParsed?.actualItems || order.actual_items || 'ללא ניכוי'}
-                    </p>
-                  </div>
-
                   <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800 space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
@@ -1418,18 +1409,6 @@ export function OrderDraftModal({
                   value={manualMenuItems}
                   onChange={e => setManualMenuItems(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  {isRtl ? 'פריטי מחסן בפועל' : 'Actual Warehouse Items'}
-                </label>
-                <input
-                  type="text"
-                  value={manualActualItems}
-                  onChange={e => setManualActualItems(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-semibold text-emerald-600 dark:text-emerald-400 focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40"
                 />
               </div>
             </div>
@@ -1534,7 +1513,7 @@ export function OrderDeleteModal({
                 {isRtl ? 'ביטול ומחיקת משלוח' : 'Cancel & Delete Order'}
               </h3>
               <p className="text-xs text-slate-400 dark:text-slate-500">
-                {isRtl ? 'החזרת מלאי אוטומטית למחסן' : 'Automatic stock restoration'}
+                {isRtl ? 'הסרת המשלוח ועדכון קופת השליח' : 'Order removal & courier cash update'}
               </p>
             </div>
           </div>
@@ -1561,15 +1540,6 @@ export function OrderDeleteModal({
               <>Are you sure you want to cancel the order for <strong className="text-slate-900 dark:text-white font-bold">{order.address}</strong>?</>
             )}
           </p>
-
-          <div className="p-2.5 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200/50 dark:border-emerald-900/40 text-[11px] space-y-1">
-            <span className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
-              <span>📦</span> {isRtl ? 'מוצרים שיוחזרו אוטומטית למלאי המחסן:' : 'Stock to be restored:'}
-            </span>
-            <p className="text-emerald-700 dark:text-emerald-400 font-semibold pl-4">
-              {order.actual_items || '—'}
-            </p>
-          </div>
 
           <div className="p-2.5 rounded-lg bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200/50 dark:border-amber-900/40 text-[11px] space-y-1">
             <span className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1">
@@ -1599,10 +1569,10 @@ export function OrderDeleteModal({
             {isDeleting ? (
               <>
                 <RefreshIcon className="w-3.5 h-3.5 animate-spin" />
-                <span>{isRtl ? 'מוחק ומחזיר מלאי...' : 'Deleting & Restoring...'}</span>
+                <span>{isRtl ? 'מוחק משלוח...' : 'Deleting...'}</span>
               </>
             ) : (
-              <span>{isRtl ? '🗑️ מחק משלוח והחזר מלאי' : '🗑️ Cancel & Restore Stock'}</span>
+              <span>{isRtl ? '🗑️ מחק משלוח' : '🗑️ Delete Order'}</span>
             )}
           </button>
         </div>

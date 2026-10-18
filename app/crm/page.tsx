@@ -1052,7 +1052,6 @@ export default function GhostCrmDashboard() {
       t.colTelegram,
       t.colLastBrand,
       t.colMenuItems,
-      t.colActualItems,
       t.colPrice,
       'Date'
     ]
@@ -1065,7 +1064,6 @@ export default function GhostCrmDashboard() {
       `"${o.crm_customers?.telegram_handle || ''}"`,
       `"${(o.brands?.name || '').replace(/"/g, '""')}"`,
       `"${(o.menu_items || '').replace(/"/g, '""')}"`,
-      `"${(o.actual_items || '').replace(/"/g, '""')}"`,
       o.total_price || 0,
       `"${new Date(o.order_date).toLocaleString()}"`
     ])

@@ -832,7 +832,6 @@ export function OrdersRouteView({
                 <th className="py-3.5 px-3">{t.colTelegram}</th>
                 <th className="py-3.5 px-3">{t.colLastBrand}</th>
                 <th className="py-3.5 px-3">{t.colMenuItems}</th>
-                <th className="py-3.5 px-3">{t.colActualItems}</th>
                 <th className="py-3.5 px-4">{t.colPrice}</th>
                 <th className="py-3.5 px-3 text-center">{t.colActions}</th>
               </tr>
@@ -840,7 +839,7 @@ export function OrdersRouteView({
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-xs">
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-slate-400 dark:text-slate-500">
+                  <td colSpan={9} className="py-12 text-center text-slate-400 dark:text-slate-500">
                     No matching dispatches found for current filters.
                   </td>
                 </tr>
@@ -949,11 +948,6 @@ export function OrdersRouteView({
                       </td>
                       <td className="py-3.5 px-3 text-slate-600 dark:text-slate-300 max-w-xs truncate font-medium">
                         {order.menu_items || '—'}
-                      </td>
-                      <td className="py-3.5 px-3">
-                        <span className="inline-block px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-bold text-[11px]">
-                          {order.actual_items || '—'}
-                        </span>
                       </td>
                       <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white text-sm whitespace-nowrap">
                         {(() => {
