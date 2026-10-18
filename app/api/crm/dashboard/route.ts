@@ -1119,6 +1119,32 @@ export async function POST(req: Request) {
       const STANDARD_FEE = 100
       const BAT_YAM_FEE = 50
 
+      // 3a. Fetch all recorded intermediate settlements in this active shift to respect actual reconciled courier pay & bonuses
+      let settlementsQuery = supabaseAdmin
+        .from('cash_settlements')
+        .select('courier_id, courier_pay, bonus_amount, notes, gross_collected, amount_received, net_expected')
+        .eq('status', 'SETTLED')
+
+      if (shiftStart) {
+        settlementsQuery = settlementsQuery.gt('created_at', shiftStart).lte('created_at', shiftEnd)
+      } else {
+        settlementsQuery = settlementsQuery.lte('created_at', shiftEnd)
+      }
+
+      const { data: shiftSettlements } = await settlementsQuery
+
+      const settledPayByCourier = new Map<string, { totalPay: number; totalBonus: number; count: number }>()
+      for (const s of shiftSettlements || []) {
+        if (s.courier_id && !s.notes?.includes('סגירת יום רשמית')) {
+          const prev = settledPayByCourier.get(s.courier_id) || { totalPay: 0, totalBonus: 0, count: 0 }
+          settledPayByCourier.set(s.courier_id, {
+            totalPay: prev.totalPay + (Number(s.courier_pay) || 0),
+            totalBonus: prev.totalBonus + (Number(s.bonus_amount) || 0),
+            count: prev.count + 1
+          })
+        }
+      }
+
       const courierMap = new Map<string, {
         courier_id: string
         courier_name: string
@@ -1170,51 +1196,39 @@ export async function POST(req: Request) {
         entry.cash_collected += physicalCash
         entry.bit_collected += bitAmount
 
+        const hasSettlements = settledPayByCourier.has(cId)
         if (cId !== 'unassigned') {
-          const combined = [
-            o.city || '',
-            o.address || '',
-            (o as any).crm_customers?.city || '',
-            (o as any).crm_customers?.address_name || '',
-            (o as any).raw_message || ''
-          ].join(' ').toLowerCase()
+          // If courier already did intermediate settlements, ONLY calculate fee for newly added / unsettled orders!
+          if (!hasSettlements || !o.is_settled) {
+            const combined = [
+              o.city || '',
+              o.address || '',
+              (o as any).crm_customers?.city || '',
+              (o as any).crm_customers?.address_name || '',
+              (o as any).raw_message || ''
+            ].join(' ').toLowerCase()
 
-          const isBatYam =
-            combined.includes('בת ים') ||
-            combined.includes('בת-ים') ||
-            combined.includes('בתים') ||
-            combined.includes('יוספטל') ||
-            combined.includes('יוסף טל') ||
-            combined.includes('בלפור') ||
-            combined.includes('הקוממיות') ||
-            combined.includes('bat yam') ||
-            combined.includes('bat-yam') ||
-            combined.includes('batyam') ||
-            combined.includes('yoseftal')
+            const isBatYam =
+              combined.includes('בת ים') ||
+              combined.includes('בת-ים') ||
+              combined.includes('בתים') ||
+              combined.includes('יוספטל') ||
+              combined.includes('יוסף טל') ||
+              combined.includes('בלפור') ||
+              combined.includes('הקוממיות') ||
+              combined.includes('bat yam') ||
+              combined.includes('bat-yam') ||
+              combined.includes('batyam') ||
+              combined.includes('yoseftal')
 
-          if (isBatYam) {
-            entry.bat_yam_count += 1
-            entry.courier_fee += BAT_YAM_FEE
-          } else {
-            entry.standard_count += 1
-            entry.courier_fee += STANDARD_FEE
+            if (isBatYam) {
+              entry.bat_yam_count += 1
+              entry.courier_fee += BAT_YAM_FEE
+            } else {
+              entry.standard_count += 1
+              entry.courier_fee += STANDARD_FEE
+            }
           }
-        }
-      }
-
-      // 3b. Fetch all recorded settlements in this active shift to include recorded bonuses & courier fees
-      const { data: shiftSettlements } = await supabaseAdmin
-        .from('cash_settlements')
-        .select('courier_id, courier_pay, bonus_amount, notes')
-        .eq('status', 'SETTLED')
-        .gt('created_at', shiftStart)
-        .lte('created_at', shiftEnd)
-
-      const courierBonusMap = new Map<string, number>()
-      for (const s of shiftSettlements || []) {
-        if (s.courier_id && !s.notes?.includes('סגירת יום רשמית')) {
-          const currentBonus = courierBonusMap.get(s.courier_id) || 0
-          courierBonusMap.set(s.courier_id, currentBonus + (Number(s.bonus_amount) || 0))
         }
       }
 
@@ -1226,16 +1240,18 @@ export async function POST(req: Request) {
       const courierBreakdown: any[] = []
 
       courierMap.forEach((entry) => {
-        const bonus = courierBonusMap.get(entry.courier_id) || 0
-        entry.bonus = bonus
-        entry.courier_fee += bonus
+        const settledInfo = settledPayByCourier.get(entry.courier_id)
+        if (settledInfo) {
+          entry.courier_fee += settledInfo.totalPay
+          entry.bonus = settledInfo.totalBonus
+        }
         // The courier only deposits physical cash in the safe! Bit was collected directly by provider.
         entry.net_to_safe = Math.max(0, entry.cash_collected - entry.courier_fee)
         totalGross += entry.gross_collected
         totalPhysicalCash += entry.cash_collected
         totalBitCredit += entry.bit_collected
         totalCourierPay += entry.courier_fee
-        totalBonus += bonus
+        totalBonus += (entry.bonus || 0)
         courierBreakdown.push(entry)
       })
 

@@ -707,6 +707,22 @@ export default function GhostCrmDashboard() {
     const STANDARD_FEE = 100
     const BAT_YAM_FEE = 50
 
+    // Group recorded settlements by courier during this active shift
+    const settledPayByCourier = new Map<string, { totalPay: number; totalBonus: number; count: number }>()
+    for (const s of recentSettlements || []) {
+      if (s.courier_id && !s.notes?.includes('סגירת יום רשמית') && s.status === 'SETTLED') {
+        const isWithinShift = shiftStartTime ? (s.created_at && s.created_at > shiftStartTime) : true
+        if (isWithinShift) {
+          const prev = settledPayByCourier.get(s.courier_id) || { totalPay: 0, totalBonus: 0, count: 0 }
+          settledPayByCourier.set(s.courier_id, {
+            totalPay: prev.totalPay + (Number(s.courier_pay) || 0),
+            totalBonus: prev.totalBonus + (Number(s.bonus_amount) || 0),
+            count: prev.count + 1
+          })
+        }
+      }
+    }
+
     const map = new Map<string, {
       courier_id: string
       courier_name: string
@@ -716,6 +732,7 @@ export default function GhostCrmDashboard() {
       bit_collected: number
       crypto_collected: number
       courier_fee: number
+      bonus: number
       net_to_safe: number
     }>()
 
@@ -734,6 +751,7 @@ export default function GhostCrmDashboard() {
           bit_collected: 0,
           crypto_collected: 0,
           courier_fee: 0,
+          bonus: 0,
           net_to_safe: 0
         })
       }
@@ -751,20 +769,12 @@ export default function GhostCrmDashboard() {
       entry.bit_collected += (isBit ? price : 0)
       entry.crypto_collected = (entry.crypto_collected || 0) + (isCrypto ? price : 0)
 
+      const hasSettlements = settledPayByCourier.has(cId)
       if (cId !== 'unassigned') {
-        const isBatYam = isBatYamOrder(o)
-        entry.courier_fee += isBatYam ? BAT_YAM_FEE : STANDARD_FEE
-      }
-    }
-
-    // Aggregate bonuses awarded to couriers in intermediate settlements during this active shift
-    const courierBonusMap = new Map<string, number>()
-    for (const s of recentSettlements || []) {
-      if (s.courier_id && !s.notes?.includes('סגירת יום רשמית')) {
-        const isWithinShift = shiftStartTime ? (s.created_at && s.created_at > shiftStartTime) : true
-        if (isWithinShift) {
-          const currentBonus = courierBonusMap.get(s.courier_id) || 0
-          courierBonusMap.set(s.courier_id, currentBonus + (Number(s.bonus_amount) || 0))
+        // If courier already did intermediate settlements, ONLY calculate fee for newly added / unsettled orders!
+        if (!hasSettlements || !o.is_settled) {
+          const isBatYam = isBatYamOrder(o)
+          entry.courier_fee += isBatYam ? BAT_YAM_FEE : STANDARD_FEE
         }
       }
     }
@@ -778,8 +788,11 @@ export default function GhostCrmDashboard() {
     const couriersList: any[] = []
 
     map.forEach((entry) => {
-      const bonus = courierBonusMap.get(entry.courier_id) || 0
-      entry.courier_fee += bonus
+      const settledInfo = settledPayByCourier.get(entry.courier_id)
+      if (settledInfo) {
+        entry.courier_fee += settledInfo.totalPay
+        entry.bonus = settledInfo.totalBonus
+      }
       // Courier only deposits physical cash in the safe
       entry.net_to_safe = Math.max(0, entry.cash_collected - entry.courier_fee)
       totalGross += entry.gross_collected
