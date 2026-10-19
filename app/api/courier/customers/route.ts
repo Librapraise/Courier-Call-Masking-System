@@ -102,16 +102,26 @@ export async function GET(request: NextRequest) {
         .from('crm_couriers')
         .select('id, name, phone_number, telegram_id')
 
+      const userEmail = (user.email || '').toLowerCase()
       matchedCrmCourier = (crmCouriers || []).find(c => {
         const cClean = (c.phone_number || '').replace(/\D/g, '')
         const matchPhone = cleanUserPhone && cClean && (cleanUserPhone.endsWith(cClean.slice(-9)) || cClean.endsWith(cleanUserPhone.slice(-9)))
         const matchTelegram = telegramId && String(c.telegram_id) === String(telegramId)
-        return matchPhone || matchTelegram
+        const matchEmail = userEmail && (
+          (userEmail.includes('subi') && c.name.includes('שובי')) ||
+          (userEmail.includes('soso') && c.name.includes('סוסו')) ||
+          (userEmail.includes('monkey') && c.name.toLowerCase().includes('monkey')) ||
+          (userEmail.includes('mair') && c.name.toLowerCase().includes('mair')) ||
+          (userEmail.includes('tofi') && c.name.toLowerCase().includes('tofi')) ||
+          (userEmail.includes('zoan') && c.name.toLowerCase().includes('zoan')) ||
+          (userEmail.includes('lola') && c.name.includes('לולה'))
+        )
+        return matchPhone || matchTelegram || matchEmail
       })
 
       if (matchedCrmCourier) {
-        // Fetch active crm_orders for this courier (must be unsettled and in current shift)
-        let activeOrdersQuery = supabaseAdmin
+        // Fetch all active unsettled crm_orders assigned to this courier
+        const { data: activeOrders } = await supabaseAdmin
           .from('crm_orders')
           .select(`
             id,
@@ -132,12 +142,6 @@ export async function GET(request: NextRequest) {
           .eq('courier_id', matchedCrmCourier.id)
           .eq('is_settled', false)
           .order('created_at', { ascending: false })
-
-        if (shiftStartIso) {
-          activeOrdersQuery = activeOrdersQuery.gt('order_date', shiftStartIso)
-        }
-
-        const { data: activeOrders } = await activeOrdersQuery
 
         // Fetch all existing rows in customers table
         const { data: allCusts } = await supabaseAdmin

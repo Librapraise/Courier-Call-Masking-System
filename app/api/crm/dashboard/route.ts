@@ -663,15 +663,13 @@ export async function POST(req: Request) {
       const oldCourier: any = (previousOrder as any)?.crm_couriers
       const newCourierId = courierId || null
 
-      if (oldCourierId === newCourierId) {
-        // Nothing changed, avoid duplicate alerts
-        return NextResponse.json({ success: true, message: 'No courier change' })
-      }
-
-      // 1. Update order in crm_orders and select full details
+      // 1. Update order in crm_orders (when courier assigned, ensure is_settled: false so courier sees it immediately)
       const { data: updatedOrder, error: updateErr } = await supabaseAdmin
         .from('crm_orders')
-        .update({ courier_id: newCourierId })
+        .update({ 
+          courier_id: newCourierId,
+          ...(newCourierId ? { is_settled: false } : {})
+        })
         .eq('id', orderId)
         .select(`
           id,
@@ -702,6 +700,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: updateErr.message }, { status: 400 })
       }
 
+      invalidateDashboardCache()
+
       const assignedCourier = (updatedOrder as any)?.crm_couriers
       const custPhone = (updatedOrder as any)?.crm_customers?.phone_number
 
@@ -723,12 +723,23 @@ export async function POST(req: Request) {
           const cleanCourierPhone = (assignedCourier.phone_number || '').replace(/\D/g, '')
           const { data: profiles } = await supabaseAdmin
             .from('profiles')
-            .select('id, phone_number, role')
+            .select('id, phone_number, role, email')
             .eq('role', 'courier')
 
           const matchedProfile = (profiles || []).find(p => {
             const pClean = (p.phone_number || '').replace(/\D/g, '')
-            return pClean && cleanCourierPhone && (pClean.endsWith(cleanCourierPhone.slice(-9)) || cleanCourierPhone.endsWith(pClean.slice(-9)))
+            const matchPhone = pClean && cleanCourierPhone && (pClean.endsWith(cleanCourierPhone.slice(-9)) || cleanCourierPhone.endsWith(pClean.slice(-9)))
+            const pEmail = (p.email || '').toLowerCase()
+            const matchEmail = (
+              (pEmail.includes('subi') && assignedCourier.name.includes('שובי')) ||
+              (pEmail.includes('soso') && assignedCourier.name.includes('סוסו')) ||
+              (pEmail.includes('monkey') && assignedCourier.name.toLowerCase().includes('monkey')) ||
+              (pEmail.includes('mair') && assignedCourier.name.toLowerCase().includes('mair')) ||
+              (pEmail.includes('tofi') && assignedCourier.name.toLowerCase().includes('tofi')) ||
+              (pEmail.includes('zoan') && assignedCourier.name.toLowerCase().includes('zoan')) ||
+              (pEmail.includes('lola') && assignedCourier.name.includes('לולה'))
+            )
+            return matchPhone || matchEmail
           })
 
           targetProfileId = matchedProfile ? matchedProfile.id : (profiles?.[0]?.id || null)
