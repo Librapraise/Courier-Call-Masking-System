@@ -2299,7 +2299,7 @@ export default function GhostCrmDashboard() {
                 </span>
               </div>
               <p className="text-base font-extrabold text-slate-900 dark:text-white">
-                {selectedOrderForDrawer.crm_customers?.address_name || selectedOrderForDrawer.address}
+                {selectedOrderForDrawer.address || selectedOrderForDrawer.crm_customers?.address_name}
               </p>
               <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 font-medium">
                 <MapPinIcon className="w-4 h-4 text-[#4352E8] dark:text-indigo-400" />

@@ -1059,9 +1059,10 @@ export function OrderDraftModal({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Initialize modal data
+  // Initialize modal data (keyed on orderId to prevent background sync from wiping active typing)
+  const orderId = order?.id
   useEffect(() => {
-    if (order) {
+    if (order && isOpen) {
       const initialText = order.raw_message?.trim() || [
         order.address || '',
         order.crm_customers?.phone_number || '',
@@ -1082,13 +1083,13 @@ export function OrderDraftModal({
 
       const payInfo = getOrderPaymentInfo(order)
       setManualPaymentMethod(payInfo.paymentMethod)
-    } else {
+    } else if (!isOpen) {
       setRawText('')
       setSelectedCourierId('')
       setManualPaymentMethod('CASH')
     }
     setError(null)
-  }, [order, isOpen])
+  }, [orderId, isOpen])
 
   // Live real-time parsing of draft text
   const liveParsed = useMemo<ParsedDeliveryOrder | null>(() => {
@@ -1121,6 +1122,10 @@ export function OrderDraftModal({
           return
         }
         payload.rawMessage = rawText.trim()
+        if (liveParsed?.customerName) {
+          payload.parsedAddress = liveParsed.customerName
+          payload.parsedCity = liveParsed.city
+        }
       } else {
         payload.manualFields = {
           address: manualAddress.trim(),
@@ -1143,8 +1148,8 @@ export function OrderDraftModal({
 
       onSuccess(
         isRtl
-          ? `המשלוח עבור "${data.order?.address || order.address}" עודכן והמלאי חושב מחדש.`
-          : `Order for "${data.order?.address || order.address}" updated and inventory reconciled.`
+          ? `המשלוח עבור "${data.order?.address || manualAddress || order.address}" עודכן בהצלחה.`
+          : `Order for "${data.order?.address || manualAddress || order.address}" updated successfully.`
       )
       onClose()
     } catch (err: any) {
@@ -1197,7 +1202,14 @@ export function OrderDraftModal({
           <div className="inline-flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shrink-0">
             <button
               type="button"
-              onClick={() => setActiveMode('draft')}
+              onClick={() => {
+                setActiveMode('draft')
+                if (manualAddress.trim()) {
+                  const lines = rawText.split('\n')
+                  lines[0] = manualAddress.trim()
+                  setRawText(lines.join('\n'))
+                }
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                 activeMode === 'draft'
                   ? 'bg-white dark:bg-slate-800 text-[#4352E8] dark:text-indigo-400 shadow-xs'
@@ -1209,7 +1221,24 @@ export function OrderDraftModal({
             </button>
             <button
               type="button"
-              onClick={() => setActiveMode('fields')}
+              onClick={() => {
+                setActiveMode('fields')
+                if (liveParsed?.customerName) {
+                  setManualAddress(liveParsed.customerName)
+                }
+                if (liveParsed?.city) {
+                  setManualCity(liveParsed.city)
+                }
+                if (liveParsed?.totalPrice) {
+                  setManualPrice(String(liveParsed.totalPrice))
+                }
+                if (liveParsed?.menuItems) {
+                  setManualMenuItems(liveParsed.menuItems)
+                }
+                if (liveParsed?.paymentMethod) {
+                  setManualPaymentMethod(liveParsed.paymentMethod)
+                }
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                 activeMode === 'fields'
                   ? 'bg-white dark:bg-slate-800 text-[#4352E8] dark:text-indigo-400 shadow-xs'
@@ -1253,24 +1282,31 @@ export function OrderDraftModal({
                 {/* Draft Textarea */}
                 <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    {isRtl ? 'תוכן הודעת המשלוח (טיוטה חיה):' : 'Delivery Message Text (Live Draft):'}
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <span>{isRtl ? 'תוכן הודעת המשלוח (שורה 1 = כתובת ויעד):' : 'Delivery Message Text (Line 1 = Destination Address):'}</span>
                   </label>
-                  <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                    {isRtl ? 'כולל חוק הסלאש /' : 'Slash rule supported'}
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+                    {isRtl ? 'ערוך את שורה 1 לשינוי הכתובת' : 'Edit line 1 to change address'}
                   </span>
                 </div>
                 <textarea
                   rows={9}
                   value={rawText}
-                  onChange={e => setRawText(e.target.value)}
+                  onChange={e => {
+                    const newText = e.target.value
+                    setRawText(newText)
+                    const firstLine = newText.split('\n')[0]?.trim()
+                    if (firstLine) {
+                      setManualAddress(firstLine)
+                    }
+                  }}
                   placeholder={`זבולון גרז 1 ברחובות\n0542584240\n10 בזונים רפואי רפואי האני / 10g רפואי האני\n₪500 כולל משלוח`}
                   className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 resize-none"
                 />
                 <p className="text-[10px] text-slate-400 dark:text-slate-500">
                   {isRtl
-                    ? '💡 עדכן כמויות, פריטים או מחיר ישירות בטקסט — המערכת תעדכן את המלאי בהתאם.'
-                    : '💡 Modify text directly — stock deductions & cash will be recalculated automatically.'}
+                    ? '💡 שורה ראשונה קובעת את כתובת המשלוח. לשינוי ישיר של שדות בנפרד, עבור ללשונית "עריכת שדות ידנית".'
+                    : '💡 Line 1 defines the delivery address. To edit fields separately, switch to "Manual Form Fields".'}
                 </p>
               </div>
 

@@ -860,7 +860,7 @@ export function OrdersRouteView({
                       <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white max-w-xs truncate">
                         <div className="flex items-center gap-2">
                           <span className="w-2 h-2 rounded-full bg-[#4352E8] shrink-0" />
-                          <span className="truncate">{cust?.address_name || order.address}</span>
+                          <span className="truncate">{order.address || cust?.address_name}</span>
                         </div>
                       </td>
                       <td className="py-3.5 px-3" onClick={e => e.stopPropagation()}>

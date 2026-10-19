@@ -2154,10 +2154,11 @@ export async function POST(req: Request) {
       let finalRawMessage = rawMessage !== undefined ? rawMessage : currentOrder.raw_message
       let newPaymentMethod = currentOrder.payment_method || 'CASH'
       let newIsPrepaid = currentOrder.is_prepaid === true
+      let parsed: any = null
 
       // If rawMessage was edited, parse it and reconcile deductions!
       if (rawMessage && typeof rawMessage === 'string' && rawMessage.trim()) {
-        const parsed = parseDeliveryMessage(rawMessage.trim())
+        parsed = parseDeliveryMessage(rawMessage.trim())
         if (parsed.customerName) newAddress = parsed.customerName
         if (parsed.city) newCity = parsed.city
         if (parsed.menuItems) newMenuItems = parsed.menuItems
@@ -2212,22 +2213,54 @@ export async function POST(req: Request) {
         }
       }
 
-      // Update customer total_spent difference
-      if (currentOrder.customer_id && newTotalPrice !== Number(currentOrder.total_price)) {
-        const delta = newTotalPrice - Number(currentOrder.total_price)
-        const { data: cust } = await supabaseAdmin
-          .from('crm_customers')
-          .select('total_spent')
-          .eq('id', currentOrder.customer_id)
-          .single()
-        if (cust) {
-          await supabaseAdmin
+      // Update customer total_spent difference, and keep address_name & city in sync
+      if (currentOrder.customer_id) {
+        const custUpdates: Record<string, any> = {
+          address_name: newAddress,
+          city: newCity,
+          updated_at: new Date().toISOString()
+        }
+        if (parsed?.phoneNumber) {
+          custUpdates.phone_number = parsed.phoneNumber
+        }
+        if (newTotalPrice !== Number(currentOrder.total_price)) {
+          const delta = newTotalPrice - Number(currentOrder.total_price)
+          const { data: cust } = await supabaseAdmin
             .from('crm_customers')
-            .update({
-              total_spent: Math.max(0, Number(cust.total_spent || 0) + delta),
-              updated_at: new Date().toISOString()
-            })
+            .select('total_spent')
             .eq('id', currentOrder.customer_id)
+            .single()
+          if (cust) {
+            custUpdates.total_spent = Math.max(0, Number(cust.total_spent || 0) + delta)
+          }
+        }
+        await supabaseAdmin
+          .from('crm_customers')
+          .update(custUpdates)
+          .eq('id', currentOrder.customer_id)
+      }
+
+      // Also synchronize to legacy customers table for courier masked calling
+      const targetPhone = parsed?.phoneNumber || currentOrder.crm_customers?.phone_number
+      if (targetPhone) {
+        const cleanCustPhone = targetPhone.replace(/\D/g, '')
+        const { data: legacyCusts } = await supabaseAdmin
+          .from('customers')
+          .select('id, phone_number')
+
+        const matchedCust = (legacyCusts || []).find(c => {
+          const cClean = (c.phone_number || '').replace(/\D/g, '')
+          return cClean && cleanCustPhone && (cClean.endsWith(cleanCustPhone.slice(-9)) || cleanCustPhone.endsWith(cClean.slice(-9)))
+        })
+
+        if (matchedCust) {
+          await supabaseAdmin
+            .from('customers')
+            .update({
+              name: newAddress,
+              is_active: true
+            })
+            .eq('id', matchedCust.id)
         }
       }
 
@@ -2261,6 +2294,18 @@ export async function POST(req: Request) {
       if (updateErr) {
         return NextResponse.json({ error: updateErr.message }, { status: 400 })
       }
+
+      // Ensure updatedOrder reflects the updated customer address_name
+      if (updatedOrder && (updatedOrder as any).crm_customers) {
+        (updatedOrder as any).crm_customers.address_name = newAddress
+        (updatedOrder as any).crm_customers.city = newCity
+        if (parsed?.phoneNumber) {
+          (updatedOrder as any).crm_customers.phone_number = parsed.phoneNumber
+        }
+      }
+
+      // Invalidate dashboard cache immediately so GET /api/crm/dashboard returns fresh data
+      invalidateDashboardCache()
 
       // 5. Notify assigned courier via Telegram if price, address, items, or courier was changed
       const botToken = process.env.TELEGRAM_BOT_TOKEN
