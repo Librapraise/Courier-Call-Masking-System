@@ -251,13 +251,39 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Instant notification to warehouseman for ATM Cash Withdrawal Codes
+        // Instant notification strictly to WAREHOUSEMAN for ATM Cash Withdrawal Codes
         if (parsed.paymentMethod === 'ATM_CODE') {
           const warehouseTelegramIds = new Set<string>()
           const whEnv = (process.env.WAREHOUSE_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
           whEnv.forEach(id => warehouseTelegramIds.add(id))
-          const adminEnv = (process.env.ALLOWED_TELEGRAM_ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
-          adminEnv.forEach(id => warehouseTelegramIds.add(id))
+
+          try {
+            // Also fetch any database profiles / auth users explicitly assigned the 'warehouseman' role
+            const { data: whProfiles } = await supabaseAdmin
+              .from('profiles')
+              .select('id, phone_number, role')
+              .eq('role', 'warehouseman')
+
+            const { data: crmRoster } = await supabaseAdmin
+              .from('crm_couriers')
+              .select('phone_number, telegram_id, name')
+
+            const { data: authUsersList } = await supabaseAdmin.auth.admin.listUsers()
+
+            for (const u of authUsersList?.users || []) {
+              if (u.user_metadata?.role === 'warehouseman' && u.user_metadata?.telegram_id) {
+                warehouseTelegramIds.add(String(u.user_metadata.telegram_id).trim())
+              }
+            }
+
+            for (const wp of whProfiles || []) {
+              const cleanPhone = (wp.phone_number || '').replace(/\D/g, '')
+              const matched = (crmRoster || []).find(r => (r.phone_number || '').replace(/\D/g, '').endsWith(cleanPhone.slice(-9)))
+              if (matched?.telegram_id) warehouseTelegramIds.add(String(matched.telegram_id).trim())
+            }
+          } catch (dbErr) {
+            console.warn('[TelegramWebhook] Error fetching warehouse profiles:', dbErr)
+          }
 
           const botToken = process.env.TELEGRAM_BOT_TOKEN || ''
           if (botToken && warehouseTelegramIds.size > 0) {
@@ -273,20 +299,18 @@ export async function POST(req: NextRequest) {
               `🛵 *לשליח שובצה גבייה:* *0₪* (שולם בקוד).\n` +
               `🔗 [לצפייה בפרטי ההזמנה בדשבורד](${defaultBase}/crm)`
 
-            // Send concurrent alerts to all registered warehouse managers
-            if (warehouseTelegramIds.size > 0) {
-              Promise.allSettled(
-                Array.from(warehouseTelegramIds).map(whId =>
-                  sendTelegramMessage(botToken, {
-                    chat_id: whId,
-                    parse_mode: 'Markdown',
-                    text: atmAlertText
-                  })
-                )
-              ).catch(whErr => {
-                console.warn('[TelegramWebhook] Error sending ATM code alert to warehouseman:', whErr)
-              })
-            }
+            // Send concurrent alerts strictly to registered warehouse managers
+            Promise.allSettled(
+              Array.from(warehouseTelegramIds).map(whId =>
+                sendTelegramMessage(botToken, {
+                  chat_id: whId,
+                  parse_mode: 'Markdown',
+                  text: atmAlertText
+                })
+              )
+            ).catch(whErr => {
+              console.warn('[TelegramWebhook] Error sending ATM code alert to warehouseman:', whErr)
+            })
           }
         }
       }
