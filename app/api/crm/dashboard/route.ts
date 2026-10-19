@@ -726,21 +726,27 @@ export async function POST(req: Request) {
             .select('id, phone_number, role, email')
             .eq('role', 'courier')
 
-          const matchedProfile = (profiles || []).find(p => {
+          // 1. Primary match: by phone number
+          let matchedProfile = (profiles || []).find(p => {
             const pClean = (p.phone_number || '').replace(/\D/g, '')
-            const matchPhone = pClean && cleanCourierPhone && (pClean.endsWith(cleanCourierPhone.slice(-9)) || cleanCourierPhone.endsWith(pClean.slice(-9)))
-            const pEmail = (p.email || '').toLowerCase()
-            const matchEmail = (
-              (pEmail.includes('subi') && assignedCourier.name.includes('שובי')) ||
-              (pEmail.includes('soso') && assignedCourier.name.includes('סוסו')) ||
-              (pEmail.includes('monkey') && assignedCourier.name.toLowerCase().includes('monkey')) ||
-              (pEmail.includes('mair') && assignedCourier.name.toLowerCase().includes('mair')) ||
-              (pEmail.includes('tofi') && assignedCourier.name.toLowerCase().includes('tofi')) ||
-              (pEmail.includes('zoan') && assignedCourier.name.toLowerCase().includes('zoan')) ||
-              (pEmail.includes('lola') && assignedCourier.name.includes('לולה'))
-            )
-            return matchPhone || matchEmail
+            return pClean && cleanCourierPhone && (pClean.endsWith(cleanCourierPhone.slice(-9)) || cleanCourierPhone.endsWith(pClean.slice(-9)))
           })
+
+          // 2. Secondary fallback: by email alias
+          if (!matchedProfile) {
+            matchedProfile = (profiles || []).find(p => {
+              const pEmail = (p.email || '').toLowerCase()
+              return (
+                (pEmail.includes('subi') && assignedCourier.name.includes('שובי')) ||
+                (pEmail.includes('soso') && !pEmail.includes('sosoma') && assignedCourier.name.includes('סוסו') && !assignedCourier.name.includes('מחסנאי')) ||
+                (pEmail.includes('monkey') && assignedCourier.name.toLowerCase().includes('monkey')) ||
+                (pEmail.includes('mair') && assignedCourier.name.toLowerCase().includes('mair')) ||
+                (pEmail.includes('tofi') && assignedCourier.name.toLowerCase().includes('tofi')) ||
+                (pEmail.includes('zoan') && assignedCourier.name.toLowerCase().includes('zoan')) ||
+                (pEmail.includes('lola') && assignedCourier.name.includes('לולה'))
+              )
+            })
+          }
 
           targetProfileId = matchedProfile ? matchedProfile.id : (profiles?.[0]?.id || null)
         }

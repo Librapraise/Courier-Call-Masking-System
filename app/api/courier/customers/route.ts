@@ -103,21 +103,36 @@ export async function GET(request: NextRequest) {
         .select('id, name, phone_number, telegram_id')
 
       const userEmail = (user.email || '').toLowerCase()
+
+      // 1. Primary Match: Direct Phone Match (deterministic)
       matchedCrmCourier = (crmCouriers || []).find(c => {
         const cClean = (c.phone_number || '').replace(/\D/g, '')
-        const matchPhone = cleanUserPhone && cClean && (cleanUserPhone.endsWith(cClean.slice(-9)) || cClean.endsWith(cleanUserPhone.slice(-9)))
-        const matchTelegram = telegramId && String(c.telegram_id) === String(telegramId)
-        const matchEmail = userEmail && (
-          (userEmail.includes('subi') && c.name.includes('שובי')) ||
-          (userEmail.includes('soso') && c.name.includes('סוסו')) ||
-          (userEmail.includes('monkey') && c.name.toLowerCase().includes('monkey')) ||
-          (userEmail.includes('mair') && c.name.toLowerCase().includes('mair')) ||
-          (userEmail.includes('tofi') && c.name.toLowerCase().includes('tofi')) ||
-          (userEmail.includes('zoan') && c.name.toLowerCase().includes('zoan')) ||
-          (userEmail.includes('lola') && c.name.includes('לולה'))
-        )
-        return matchPhone || matchTelegram || matchEmail
+        return cleanUserPhone && cClean && (cleanUserPhone.endsWith(cClean.slice(-9)) || cClean.endsWith(cleanUserPhone.slice(-9)))
       })
+
+      // 2. Secondary Match: Telegram ID
+      if (!matchedCrmCourier && telegramId) {
+        matchedCrmCourier = (crmCouriers || []).find(c => c.telegram_id && String(c.telegram_id) === String(telegramId))
+      }
+
+      // 3. Tertiary Match: Email alias with role guard
+      if (!matchedCrmCourier && userEmail) {
+        matchedCrmCourier = (crmCouriers || []).find(c => {
+          const isWarehouse = c.name.includes('מחסנאי') || c.name.toLowerCase().includes('warehouse')
+          if (profile.role === 'courier' && isWarehouse) return false
+
+          return (
+            (userEmail.includes('subi') && c.name.includes('שובי')) ||
+            (userEmail.includes('sosoma') && isWarehouse) ||
+            (userEmail.includes('soso') && !userEmail.includes('sosoma') && c.name.includes('סוסו') && !isWarehouse) ||
+            (userEmail.includes('monkey') && c.name.toLowerCase().includes('monkey')) ||
+            (userEmail.includes('mair') && c.name.toLowerCase().includes('mair')) ||
+            (userEmail.includes('tofi') && c.name.toLowerCase().includes('tofi')) ||
+            (userEmail.includes('zoan') && c.name.toLowerCase().includes('zoan')) ||
+            (userEmail.includes('lola') && c.name.includes('לולה'))
+          )
+        })
+      }
 
       if (matchedCrmCourier) {
         // Fetch all active unsettled crm_orders assigned to this courier
