@@ -2516,26 +2516,6 @@ export default function GhostCrmDashboard() {
 
             <button
               onClick={() => {
-                setActiveNav('inventory')
-                setIsMobileSidebarOpen(false)
-              }}
-              className={`w-full text-left px-3.5 py-2.5 rounded-xl font-semibold text-xs flex items-center justify-between transition cursor-pointer ${
-                activeNav === 'inventory'
-                  ? 'bg-[#1E2235] text-white shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <BoxIcon className="w-4 h-4" />
-                <span>{t.navInventory}</span>
-              </div>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${activeNav === 'inventory' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
-                {products.length}
-              </span>
-            </button>
-
-            <button
-              onClick={() => {
                 setActiveNav('settlements')
                 setIsMobileSidebarOpen(false)
               }}
@@ -2551,6 +2531,26 @@ export default function GhostCrmDashboard() {
               </div>
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${activeNav === 'settlements' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
                 {couriers.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveNav('inventory')
+                setIsMobileSidebarOpen(false)
+              }}
+              className={`w-full text-left px-3.5 py-2.5 rounded-xl font-semibold text-xs flex items-center justify-between transition cursor-pointer ${
+                activeNav === 'inventory'
+                  ? 'bg-[#1E2235] text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/60'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <BoxIcon className="w-4 h-4" />
+                <span>{t.navInventory}</span>
+              </div>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${activeNav === 'inventory' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
+                {products.length}
               </span>
             </button>
 
