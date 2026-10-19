@@ -1111,7 +1111,7 @@ export async function POST(req: Request) {
         (batchBitTotal > 0 ? `💳 *שולם מראש (ביט/אשראי):* ₪${batchBitTotal.toLocaleString()} _(לא נגבה במזומן)_\n` : '') +
         `📊 *עמלתך בסבב זה:* ₪${courierPay.toLocaleString()}\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `💳 *עליך להעביר למחסנאי במזומן: ₪${netToWarehouse.toLocaleString()}*`
+        `💳 *עליך להעביר למחסנאי: ₪${netToWarehouse.toLocaleString()}*`
 
       if (courierTgId && botToken) {
         await sendTelegramMessage(botToken, {
