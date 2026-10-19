@@ -53,32 +53,13 @@ export function formatBatchReceipt(summary: IngestionBatchSummary): string {
   const defaultBase = (process.env.NEXT_PUBLIC_APP_URL || 'https://www.couriercall.site').replace(/\/+$/, '')
   const crmLink = summary.crmUrl || `${defaultBase}/crm`
 
-  let msg = `✅ *נקלטו ${summary.totalProcessed} משלוחים בהצלחה בסיארם!*\n`
-  msg += `━━━━━━━━━━━━━━━━━━━━━\n\n`
-
-  msg += `💰 *קופת שליחים שנצברה:* ₪${summary.totalCashToday.toLocaleString()}\n\n`
-
-  if (summary.totalDeductions.length > 0) {
-    msg += `📦 *מלאי שירד מהמחסן:*\n`
-    for (const d of summary.totalDeductions) {
-      msg += `  • ${d.quantity}${d.unit === 'g' ? 'g' : ' יח׳'} *${d.productName}*\n`
-    }
-    msg += `\n`
-  }
-
-  if (summary.recentDeliveries.length > 0) {
-    msg += `📍 *משלוחים אחרונים שנקלטו:*\n`
-    const previewList = summary.recentDeliveries.slice(0, 5)
-    for (const d of previewList) {
-      msg += `  • ${d.address} | ₪${d.price} (${d.brand})\n`
-    }
-    if (summary.recentDeliveries.length > 5) {
-      msg += `  _ועוד ${summary.recentDeliveries.length - 5} משלוחים..._\n`
-    }
-    msg += `\n`
-  }
-
-  msg += `🔗 [פתח את ה-CRM לצפייה ופילוח](${crmLink})`
-
-  return msg
+  // 100% Sterile Stealth Response — No strain names, addresses, or flagged keywords sent over Telegram Bot API!
+  return (
+    `⚡ *הסנכרון הושלם בהצלחה*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📥 *נקלטו למערכת:* ${summary.totalProcessed} פריטים\n` +
+    `🕒 *שעה:* ${new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `🔗 [פתח את הדשבורד לצפייה מלאה ומאובטחת](${crmLink})`
+  )
 }

@@ -261,21 +261,17 @@ export async function POST(req: NextRequest) {
 
           const botToken = process.env.TELEGRAM_BOT_TOKEN || ''
           if (botToken && warehouseTelegramIds.size > 0) {
+            const defaultBase = (process.env.NEXT_PUBLIC_APP_URL || 'https://www.couriercall.site').replace(/\/+$/, '')
             const atmAlertText =
               `🏧 *התראת קוד משיכה מכספומט למחסנאי!*\n` +
               `━━━━━━━━━━━━━━━━━━━━━\n` +
-              `📍 *כתובת לקוח:* ${parsed.customerName}\n` +
-              `🏙️ *עיר:* ${parsed.city}\n` +
               `💰 *סכום למשיכה:* *₪${parsed.totalPrice.toLocaleString()}*\n` +
-              `📱 *טלפון:* \`${parsed.phoneNumber}\`\n` +
-              (parsed.telegramHandle ? `👤 *טלגרם:* ${parsed.telegramHandle}\n` : '') +
-              `🏷️ *מותג:* ${parsed.brand}\n` +
-              `━━━━━━━━━━━━━━━━━━━━━\n` +
-              `📝 *תוכן ההזמנה והקוד:*\n` +
-              `${parsed.rawText}\n` +
+              `🏙️ *עיר:* ${parsed.city}\n` +
+              (parsed.paymentLabel ? `🏷️ *הערת תשלום:* ${parsed.paymentLabel}\n` : '') +
               `━━━━━━━━━━━━━━━━━━━━━\n` +
               `⚡ *הנחיה למחסנאי:* יש למשוך את הכסף מהכספומט ולנעול בכספת.\n` +
-              `🛵 *לשליח שובצה גבייה:* *0₪* (שולם בקוד).`
+              `🛵 *לשליח שובצה גבייה:* *0₪* (שולם בקוד).\n` +
+              `🔗 [לצפייה בפרטי ההזמנה בדשבורד](${defaultBase}/crm)`
 
             // Send concurrent alerts to all registered warehouse managers
             if (warehouseTelegramIds.size > 0) {
