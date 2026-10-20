@@ -140,6 +140,29 @@ export async function POST(req: NextRequest) {
         }
       })
 
+      // Fetch latest closeout for net register revenue
+      let { data: latestCloseout } = await supabaseAdmin
+        .from('crm_day_closeouts')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      let netRegisterTotal = 0
+      if (latestCloseout) {
+        const netToSafe = Number(latestCloseout.net_to_safe) || 0
+        const providerBal = Number(latestCloseout.credit_provider_balance) || Number(latestCloseout.total_bit_credit) || 0
+        const atmCash = Number(latestCloseout.total_atm_code_cash) || 0
+        netRegisterTotal = netToSafe + providerBal + atmCash
+
+        if (netRegisterTotal === 0 && latestCloseout.notes) {
+          const match = latestCloseout.notes.match(/רווח:\s*₪?([\d,]+)/)
+          if (match) {
+            netRegisterTotal = parseFloat(match[1].replace(/,/g, '')) || 0
+          }
+        }
+      }
+
       // Today's orders for revenue attribution
       const shiftStartIso = await getShiftStartIso()
       let ordersQuery = supabaseAdmin
@@ -179,6 +202,13 @@ export async function POST(req: NextRequest) {
       }
 
       const report = parseBatchDepletionMessage(messageText, prodsList, todaySalesMap)
+
+      // Use the actual net cash in the register/safe from the shift closeout as requested by manager
+      if (netRegisterTotal > 0) {
+        report.netRegisterTotal = netRegisterTotal
+        report.totalRevenueToday = netRegisterTotal
+        report.totalGrossProfit = netRegisterTotal - report.totalCostOfGoods
+      }
 
       // Execute deductions in parallel
       const updatePromises = report.items.map(async (item) => {

@@ -26,6 +26,7 @@ export interface BatchDepletionReport {
   totalQuantityDepleted: number
   totalCostOfGoods: number
   totalRevenueToday: number
+  netRegisterTotal?: number
   totalGrossProfit: number
   items: DepletionLineItem[]
   unmatchedItems: { rawLine: string; extractedName: string; quantity: number }[]
@@ -239,20 +240,12 @@ export function formatDepletionTelegramReport(report: BatchDepletionReport): str
   msg += `📅 *תאריך:* ${dateStr} | 🕒 *שעה:* ${timeStr}\n`
   msg += `━━━━━━━━━━━━━━━━━━━━━\n\n`
 
+  msg += `📦 *פריטי מלאי שנפרקו:*\n`
   report.items.forEach((item, idx) => {
     const unitLabel = item.unit === 'g' ? 'גרם' : 'יח׳'
-    msg += `*${idx + 1}. ${item.matchedProductName}*\n`
-    msg += `  ▫️ כמות שנפרקה: *${item.quantity} ${unitLabel}*\n`
-    if (item.costPerUnit > 0) {
-      msg += `  ▫️ עלות ליחידה: ₪${item.costPerUnit.toLocaleString()}\n`
-      msg += `  ▫️ עלות כוללת: *₪${item.totalCost.toLocaleString()}*\n`
-    }
-    if (item.todayRevenue > 0) {
-      msg += `  ▫️ הכנסות ממכירה: ₪${item.todayRevenue.toLocaleString()}\n`
-      msg += `  ▫️ רווח גולמי: *₪${item.grossProfit.toLocaleString()}*\n`
-    }
-    msg += `  ▫️ יתרת מלאי עדכנית: *${item.newStock} ${unitLabel}*\n\n`
+    msg += `${idx + 1}. *${item.matchedProductName}* — ${item.quantity} ${unitLabel} (נותרו: ${item.newStock} ${unitLabel})\n`
   })
+  msg += `\n`
 
   if (report.unmatchedItems.length > 0) {
     msg += `⚠️ *פריטים שלא נמצאו בקטלוג:*\n`
@@ -262,14 +255,17 @@ export function formatDepletionTelegramReport(report: BatchDepletionReport): str
     msg += `━━━━━━━━━━━━━━━━━━━━━\n\n`
   }
 
+  const netCash = report.netRegisterTotal ?? report.totalRevenueToday
+  const grossProfit = report.totalGrossProfit ?? (netCash - report.totalCostOfGoods)
+
   msg += `📊 *סיכום פיננסי ועלויות סחורה:*\n`
   msg += `📦 סה״כ מוצרים שנפרקו: *${report.totalQuantityDepleted.toLocaleString()} גרם/יחידות*\n`
   if (report.totalCostOfGoods > 0) {
     msg += `📉 סה״כ עלות סחורה שנמכרה (COGS): *₪${report.totalCostOfGoods.toLocaleString()}*\n`
   }
-  if (report.totalRevenueToday > 0) {
-    msg += `💰 סה״כ מחזור מכירות משוער: *₪${report.totalRevenueToday.toLocaleString()}*\n`
-    msg += `💎 *רווח גולמי כולל מהמלאי: ₪${report.totalGrossProfit.toLocaleString()}*\n`
+  if (netCash > 0) {
+    msg += `💰 סה״כ סכום כסף נטו בקופה: *₪${netCash.toLocaleString()}*\n`
+    msg += `💎 *רווח גולמי כולל מהמלאי: ₪${grossProfit.toLocaleString()}*\n`
   }
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`
   msg += `✅ המלאי במערכת עודכן בהצלחה.`

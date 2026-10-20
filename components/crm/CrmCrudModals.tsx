@@ -1881,12 +1881,12 @@ export function BatchDepletionModal({
 
                 <div className="p-3 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 text-center">
                   <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase">
-                    {isRtl ? 'פדיון מכירות יומי' : 'Today Sales'}
+                    {isRtl ? 'סה"כ סכום כסף נטו בקופה' : 'Total Net Cash in Register'}
                   </span>
                   <p className="text-lg font-black text-indigo-700 dark:text-indigo-400 mt-0.5">
-                    ₪{report.totalRevenueToday.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ₪{(report.netRegisterTotal ?? report.totalRevenueToday).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
-                  <p className="text-[10px] text-indigo-500/80">{isRtl ? 'סה"כ הכנסות ממשלוחים' : 'Deliveries revenue'}</p>
+                  <p className="text-[10px] text-indigo-500/80">{isRtl ? 'רווח נקי מסגירת קופה' : 'Net from register closeout'}</p>
                 </div>
 
                 <div className="p-3 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 text-center">
@@ -1896,7 +1896,7 @@ export function BatchDepletionModal({
                   <p className="text-lg font-black text-emerald-700 dark:text-emerald-400 mt-0.5">
                     ₪{report.totalGrossProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
-                  <p className="text-[10px] text-emerald-500/80">{isRtl ? 'פדיון פחות עלות' : 'Revenue minus COGS'}</p>
+                  <p className="text-[10px] text-emerald-500/80">{isRtl ? 'נטו קופה פחות עלות סחורה' : 'Net register minus COGS'}</p>
                 </div>
               </div>
 

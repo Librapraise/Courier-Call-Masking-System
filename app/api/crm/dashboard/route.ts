@@ -564,13 +564,37 @@ export async function POST(req: Request) {
         }
       })
 
-      // 2. Fetch today's orders to compute revenue per product
-      const { data: latestCloseout } = await supabaseAdmin
-        .from('crm_day_closeouts')
-        .select('shift_start, shift_end, created_at')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
+      // 2. Fetch latest closeout to extract official net register cash and active shift boundary
+      let latestCloseout: any = null
+      try {
+        const { data: dbCo } = await supabaseAdmin
+          .from('crm_day_closeouts')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (dbCo) latestCloseout = dbCo
+      } catch (coErr) {}
+
+      if (!latestCloseout) {
+        const localCo = getLocalDayCloseouts()
+        if (localCo && localCo.length > 0) latestCloseout = localCo[0]
+      }
+
+      let netRegisterTotal = 0
+      if (latestCloseout) {
+        const netToSafe = Number(latestCloseout.net_to_safe) || 0
+        const providerBal = Number(latestCloseout.credit_provider_balance) || Number(latestCloseout.total_bit_credit) || 0
+        const atmCash = Number(latestCloseout.total_atm_code_cash) || 0
+        netRegisterTotal = netToSafe + providerBal + atmCash
+
+        if (netRegisterTotal === 0 && latestCloseout.notes) {
+          const match = latestCloseout.notes.match(/רווח:\s*₪?([\d,]+)/)
+          if (match) {
+            netRegisterTotal = parseFloat(match[1].replace(/,/g, '')) || 0
+          }
+        }
+      }
 
       const shiftStartIso = latestCloseout
         ? (latestCloseout.shift_end || latestCloseout.created_at)
@@ -626,6 +650,13 @@ export async function POST(req: Request) {
 
       // 3. Parse depletion message
       const report = parseBatchDepletionMessage(rawMessage, prodsList, todaySalesMap)
+
+      // Use the actual net cash in the register/safe from the shift closeout as requested by manager
+      if (netRegisterTotal > 0) {
+        report.netRegisterTotal = netRegisterTotal
+        report.totalRevenueToday = netRegisterTotal
+        report.totalGrossProfit = netRegisterTotal - report.totalCostOfGoods
+      }
 
       // 4. Execute stock deductions in parallel
       const updatePromises = report.items.map(async (item) => {
