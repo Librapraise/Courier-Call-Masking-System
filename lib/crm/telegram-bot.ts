@@ -58,7 +58,7 @@ export function formatBatchReceipt(summary: IngestionBatchSummary): string {
     `⚡ *הסנכרון הושלם בהצלחה*\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
     `📥 *נקלטו למערכת:* ${summary.totalProcessed} פריטים\n` +
-    `🕒 *שעה:* ${new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}\n` +
+    `🕒 *שעה:* ${new Date().toLocaleTimeString('he-IL', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', hour12: false })}\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n\n` +
     `🔗 [פתח את הדשבורד לצפייה מלאה ומאובטחת](${crmLink})`
   )
