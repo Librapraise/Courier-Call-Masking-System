@@ -553,17 +553,21 @@ export async function POST(req: Request) {
 
       const { data: prodsData } = await supabaseAdmin
         .from('products')
-        .select('id, name, category, unit, stock_on_hand, min_stock_alert, aliases')
+        .select('id, name, category, unit, stock_on_hand, min_stock_alert, aliases, cost_per_unit')
 
-      const prodsList = (prodsData || []).map((p: any) => ({
-        ...p,
-        cost_per_unit: Number(activeCosts[p.id] ?? activeCosts[p.name] ?? p.cost_per_unit ?? 0)
-      }))
+      const prodsList = (prodsData || []).map((p: any) => {
+        const dbCost = Number(p.cost_per_unit) || 0
+        const overrideCost = Number(activeCosts[p.id] ?? activeCosts[p.name]) || 0
+        return {
+          ...p,
+          cost_per_unit: overrideCost > 0 ? overrideCost : dbCost
+        }
+      })
 
       // 2. Fetch today's orders to compute revenue per product
       const { data: latestCloseout } = await supabaseAdmin
         .from('crm_day_closeouts')
-        .select('shift_end, created_at')
+        .select('shift_start, shift_end, created_at')
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -580,7 +584,28 @@ export async function POST(req: Request) {
         ordersQuery = ordersQuery.gt('order_date', shiftStartIso)
       }
 
-      const { data: shiftOrders } = await ordersQuery
+      let { data: shiftOrders } = await ordersQuery
+
+      // If zero orders found after shiftStartIso (e.g. manager depleted stock right after closeout),
+      // look at the orders of the shift that was just closed or past 24 hours:
+      if (!shiftOrders || shiftOrders.length === 0) {
+        let fallbackQuery = supabaseAdmin
+          .from('crm_orders')
+          .select('id, total_price, menu_items, actual_items, order_date')
+        
+        if (latestCloseout?.shift_start) {
+          fallbackQuery = fallbackQuery
+            .gte('order_date', latestCloseout.shift_start)
+            .lte('order_date', latestCloseout.shift_end || new Date().toISOString())
+        } else {
+          const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+          fallbackQuery = fallbackQuery.gte('order_date', past24h)
+        }
+        const { data: fallbackOrders } = await fallbackQuery
+        if (fallbackOrders && fallbackOrders.length > 0) {
+          shiftOrders = fallbackOrders
+        }
+      }
 
       // Calculate revenue per product based on orders in this shift
       const todaySalesMap = new Map<string, number>()

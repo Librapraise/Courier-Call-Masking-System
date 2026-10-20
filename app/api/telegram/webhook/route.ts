@@ -129,12 +129,16 @@ export async function POST(req: NextRequest) {
 
       const { data: prodsData } = await supabaseAdmin
         .from('products')
-        .select('id, name, category, unit, stock_on_hand, min_stock_alert, aliases')
+        .select('id, name, category, unit, stock_on_hand, min_stock_alert, aliases, cost_per_unit')
 
-      const prodsList = (prodsData || []).map((p: any) => ({
-        ...p,
-        cost_per_unit: Number(activeCosts[p.id] ?? activeCosts[p.name] ?? p.cost_per_unit ?? 0)
-      }))
+      const prodsList = (prodsData || []).map((p: any) => {
+        const dbCost = Number(p.cost_per_unit) || 0
+        const overrideCost = Number(activeCosts[p.id] ?? activeCosts[p.name]) || 0
+        return {
+          ...p,
+          cost_per_unit: overrideCost > 0 ? overrideCost : dbCost
+        }
+      })
 
       // Today's orders for revenue attribution
       const shiftStartIso = await getShiftStartIso()
@@ -146,7 +150,18 @@ export async function POST(req: NextRequest) {
         ordersQuery = ordersQuery.gt('order_date', shiftStartIso)
       }
 
-      const { data: shiftOrders } = await ordersQuery
+      let { data: shiftOrders } = await ordersQuery
+
+      if (!shiftOrders || shiftOrders.length === 0) {
+        const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        const { data: fallbackOrders } = await supabaseAdmin
+          .from('crm_orders')
+          .select('id, total_price, menu_items, actual_items, order_date')
+          .gte('order_date', past24h)
+        if (fallbackOrders && fallbackOrders.length > 0) {
+          shiftOrders = fallbackOrders
+        }
+      }
       const todaySalesMap = new Map<string, number>()
       if (shiftOrders) {
         for (const ord of shiftOrders) {
