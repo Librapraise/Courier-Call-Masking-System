@@ -880,7 +880,7 @@ export default function GhostCrmDashboard() {
     const query = searchQuery.toLowerCase().trim()
     const todayStr = getIsraelDateString()
 
-    return orders.filter(order => {
+    const result = orders.filter(order => {
       // Shift filter
       if (todayOnly) {
         if (shiftStartTime) {
@@ -938,7 +938,22 @@ export default function GhostCrmDashboard() {
 
       return true
     })
-  }, [orders, searchQuery, selectedBrand, selectedCity, todayOnly, settlementFilter])
+
+    // Sort: Unassigned orders to the top, assigned orders to the bottom
+    return result.sort((a, b) => {
+      const aAssigned = Boolean(a.courier_id || a.crm_couriers?.id)
+      const bAssigned = Boolean(b.courier_id || b.crm_couriers?.id)
+
+      // Unassigned first, assigned last
+      if (!aAssigned && bAssigned) return -1
+      if (aAssigned && !bAssigned) return 1
+
+      // Within the same group, sort by newest order first
+      const aDate = a.order_date || (a as any).created_at || ''
+      const bDate = b.order_date || (b as any).created_at || ''
+      return bDate.localeCompare(aDate)
+    })
+  }, [orders, searchQuery, selectedBrand, selectedCity, todayOnly, settlementFilter, shiftStartTime])
 
   // Active filters count
   const activeFiltersCount = useMemo(() => {
