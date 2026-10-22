@@ -2036,7 +2036,7 @@ export default function GhostCrmDashboard() {
                     <span className="text-lg">🏦</span>
                     <div>
                       <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                        {isRtl ? 'סה״כ רווח נקי כולל לעסק' : 'Total Business Net Profit'}
+                        {isRtl ? 'סה״כ סכום כסף נטו בקופה' : 'Total Net Cash in Register'}
                       </span>
                       <p className="text-[10px] text-slate-500 dark:text-slate-400">
                         {isRtl

@@ -1607,7 +1607,7 @@ export async function POST(req: Request) {
         `📱 *יתרה אצל ספק אשראי / ביט (טרם נמשך):*\n` +
         `💳 *₪${totalBitCredit.toLocaleString()}*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `🏦 *סה״כ רווח נקי כולל לעסק:*\n` +
+        `🏦 *סה״כ סכום כסף נטו בקופה:*\n` +
         `💎 *₪${totalOverallBusinessProfit.toLocaleString()}*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
         (notes && notes.trim() ? `📝 *הערות מנהל משמרת:*\n${notes.trim()}\n\n━━━━━━━━━━━━━━━━━━━━━\n` : '') +
@@ -1643,7 +1643,7 @@ export async function POST(req: Request) {
         `📱 *יתרה לגבייה מספק אשראי / ביט:*\n` +
         `💳 *₪${totalBitCredit.toLocaleString()}*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `🏦 *סה״כ רווח נקי כולל לעסק:*\n` +
+        `🏦 *סה״כ סכום כסף נטו בקופה:*\n` +
         `💎 *₪${totalOverallBusinessProfit.toLocaleString()}*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
         (notes && notes.trim() ? `📝 *הערות מנהל:*\n${notes.trim()}\n\n━━━━━━━━━━━━━━━━━━━━━\n` : '') +
