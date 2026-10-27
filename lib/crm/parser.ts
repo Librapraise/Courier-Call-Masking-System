@@ -55,29 +55,78 @@ export function normalizePhoneNumber(raw: string): string | null {
   return digits.length >= 9 ? digits : null
 }
 
+function parsePriceNumber(rawVal: string): number {
+  if (!rawVal) return 0
+  let cleaned = rawVal.trim()
+  // Check if formatted like 1.100 or 2.500 (1-3 digits, dot, exactly 3 digits) -> thousands separator
+  if (/^\d{1,3}\.\d{3}$/.test(cleaned)) {
+    cleaned = cleaned.replace(/\./g, '')
+  } else {
+    // Normal comma removal e.g. 1,100 -> 1100
+    cleaned = cleaned.replace(/,/g, '')
+  }
+  const num = parseFloat(cleaned)
+  return isNaN(num) ? 0 : num
+}
+
 /**
- * Extracts price from text lines.
- * Examples: '3000₪ כולל משלוח', '750₪', '₪1,200', '1100 כולל משלוח'
+ * Strips currency tokens, prices, and keywords from a line of text.
+ * Used when price is embedded on an item line (e.g. "2 קוק 1,100₪" -> "2 קוק").
+ */
+export function stripPriceFromText(line: string): string {
+  if (!line) return ''
+  return line
+    .replace(/(?:(?:₪|ש"?ח|nis|ils)\s*[0-9][0-9,.]*|[0-9][0-9,.]*\s*(?:₪|ש"?ח|nis|ils))/gi, ' ')
+    .replace(/(?:סכום(?:\s*לגב(?:יי)?ה)?|מחיר|לתשלום|לגבות|סה"?כ)\s*[:=\-]?\s*[0-9][0-9,.]*/gi, ' ')
+    .replace(/(?:[0-9][0-9,.]*\s*כולל משלוח|כולל משלוח\s*[0-9][0-9,.]*|כולל משלוח)/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Extracts price from text lines or whole messages.
+ * Robust across all Israeli price patterns:
+ * - 500₪, 500 ₪, ₪500, ₪ 500
+ * - 1,100₪, 1,100 ₪, ₪1,100, ₪ 1,100, 1.100₪
+ * - 500 ש"ח, 500 שח, ש"ח 500, שח 500
+ * - 500 NIS, 500 nis, NIS 500, nis 500, 500 ILS, 500ils
+ * - 1200 כולל משלוח, כולל משלוח 1200
+ * - סכום: 1100, מחיר: 1100, לגבות: 1100, לתשלום: 1100, סה"כ: 1100
  */
 export function extractPrice(text: string): number {
   if (!text) return 0.0
 
-  // Regex to capture price patterns: 3000₪, ₪1,200, 750 ₪, 1200 כולל משלוח
-  const priceRegex = /(?:₪\s*([\d,]+)|([\d,]+)\s*(?:₪|ש"ח|שח|כולל משלוח))/i
-  const match = text.match(priceRegex)
+  // 1. Explicit currency symbol (₪, ש"ח, שח, NIS, ILS) - Left or Right
+  // Group 1 (prefix): ₪1100, ₪ 1,100, ש"ח 500, NIS 500
+  // Group 2 (suffix): 1100₪, 1,100 ₪, 500 ש"ח, 500 שח, 500 NIS, 500 nis, 500ils
+  const currencyRegex = /(?:(?:₪|ש"?ח|nis|ils)\s*([0-9][0-9,.]*)|([0-9][0-9,.]*)\s*(?:₪|ש"?ח|nis|ils))/gi
 
-  if (match) {
+  let match: RegExpExecArray | null
+  while ((match = currencyRegex.exec(text)) !== null) {
     const rawVal = match[1] || match[2]
-    const cleanNum = parseFloat(rawVal.replace(/,/g, ''))
-    if (!isNaN(cleanNum)) return cleanNum
+    if (rawVal) {
+      const num = parsePriceNumber(rawVal)
+      if (num > 0) return num
+    }
   }
 
-  // Fallback: search for stand-alone numbers near currency keywords
-  const fallbackRegex = /(\d[\d,]*)\s*(?:כולל משלוח)/i
-  const fallbackMatch = text.match(fallbackRegex)
-  if (fallbackMatch) {
-    const cleanNum = parseFloat(fallbackMatch[1].replace(/,/g, ''))
-    if (!isNaN(cleanNum)) return cleanNum
+  // 2. Explicit keywords: סכום לגבייה, סכום, מחיר, לתשלום, לגבות, סה"כ
+  const keywordRegex = /(?:סכום(?:\s*לגב(?:יי)?ה)?|מחיר|לתשלום|לגבות|סה"?כ)\s*[:=\-]?\s*([0-9][0-9,.]*)/i
+  const kwMatch = text.match(keywordRegex)
+  if (kwMatch && kwMatch[1]) {
+    const num = parsePriceNumber(kwMatch[1])
+    if (num > 0) return num
+  }
+
+  // 3. Fallback: "כולל משלוח" (e.g. 1200 כולל משלוח or כולל משלוח 1200)
+  const shippingRegex = /(?:([0-9][0-9,.]*)\s*כולל משלוח|כולל משלוח\s*([0-9][0-9,.]*))/i
+  const shipMatch = text.match(shippingRegex)
+  if (shipMatch) {
+    const rawVal = shipMatch[1] || shipMatch[2]
+    if (rawVal) {
+      const num = parsePriceNumber(rawVal)
+      if (num > 0) return num
+    }
   }
 
   return 0.0
@@ -185,8 +234,7 @@ export function extractPaymentDetails(text: string, totalPrice: number): {
     hasCrypto ||
     hasBit ||
     hasCredit ||
-    PREPAID_REGEX.test(lower) ||
-    totalPrice === 0
+    PREPAID_REGEX.test(lower)
 
   if (hasAtmCode) {
     return {
@@ -295,8 +343,7 @@ export function getOrderPaymentInfo(order: {
     hasBit ||
     hasCredit ||
     effectivePaymentMethod === 'PREPAID' ||
-    PREPAID_REGEX.test(lower) ||
-    Number(order.total_price || 0) === 0
+    PREPAID_REGEX.test(lower)
 
   const method: PaymentMethod = hasAtmCode
     ? 'ATM_CODE'
@@ -368,6 +415,20 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
   const menuLines: string[] = []
   const deductions: ParsedItemDeduction[] = []
 
+  // 0. Extract Price anywhere in the message (across all lines or full message text)
+  // Ensures that wherever the user writes 500₪ or 1,100₪ in the message (top, middle, bottom),
+  // it is immediately and accurately extracted!
+  for (const line of rawLines) {
+    const p = extractPrice(line)
+    if (p > 0) {
+      totalPrice = p
+      break
+    }
+  }
+  if (totalPrice === 0) {
+    totalPrice = extractPrice(cleanRaw)
+  }
+
   // Check lines from bottom up to find Brand and Trailing Deductions
   let brandLineIndex = -1
   for (let i = rawLines.length - 1; i >= 0; i--) {
@@ -388,8 +449,9 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
   if (brandLineIndex !== -1 && brandLineIndex < rawLines.length - 1) {
     for (let i = brandLineIndex + 1; i < rawLines.length; i++) {
       const line = rawLines[i]
-      // Payment indicators (e.g. "שולם בקריפטו", "שולם בביט", "משלם בקוד משיכה") are never warehouse deductions
-      if (!isPaymentLine(line)) {
+      const hasPrice = extractPrice(line) > 0 || /(?:₪|ש"?ח|nis|ils)/i.test(line)
+      // Payment indicators and price lines are never warehouse deductions
+      if (!isPaymentLine(line) && !hasPrice) {
         trailingDeductionLines.push(line)
       }
     }
@@ -420,10 +482,12 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
     else if (/לקוח חדש|חדש/i.test(line)) customerType = 'חדש'
     else if (/vip/i.test(line)) customerType = 'VIP'
 
-    // 4. Check for Price
-    const foundPrice = extractPrice(line)
-    if (foundPrice > 0 && totalPrice === 0) {
-      totalPrice = foundPrice
+    // 4. Check for Price (fallback if not already extracted)
+    if (totalPrice === 0) {
+      const foundPrice = extractPrice(line)
+      if (foundPrice > 0) {
+        totalPrice = foundPrice
+      }
     }
 
     // 5. Line 1: In the vast majority of cases, Line 1 is the Customer Name / Address
@@ -509,12 +573,16 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
       // Check if this line is an item line (not address, phone, price, handle, tier, brand, or payment line)
       const isPayLine = isPaymentLine(line)
       const isBrandLine = Boolean(matchBrand(line))
-      const isVerificationLine = /(?:אימות|אושר|אישור\s*הזמנה|מאושר|בדיקה|מנהל\s+גיבוי\s+הזמנות|סדרן|הסדרן|מוקד|המוקד)/i.test(line)
+      const isVerificationLine = /(?:אימות|אושר|אישור\s*הזמנה|מאושר|בדיקה|מנהל\s+גיבוי\s+הזמנות|סדרן|הסדרן|מוקד|המוקד|משלוח\s*חיצוני|חיצוני)/i.test(line)
       const isPureSymbolOrEmoji = normalizeHebrewText(line).length === 0 && !/\d/.test(line)
+
+      const isPriceLine = extractPrice(line) > 0 || /(?:₪|ש"?ח|nis|ils)/i.test(line)
+      const strippedPrice = isPriceLine ? stripPriceFromText(line) : line
+      const isPurePriceLine = isPriceLine && (strippedPrice.length === 0 || !/[\u0590-\u05FFa-zA-Z0-9]/.test(strippedPrice))
 
       const isNotMeta = !line.match(phoneRegex) &&
         !line.match(/@([A-Za-z0-9_]+)/) &&
-        !line.match(/(?:₪|ש"ח|כולל משלוח)/) &&
+        !isPurePriceLine &&
         !line.match(/לקוח קבוע|לקוח חדש/) &&
         !isPayLine &&
         !isBrandLine &&
@@ -523,7 +591,10 @@ export function parseDeliveryMessage(rawText: string): ParsedDeliveryOrder {
         line !== customerName
 
       if (isNotMeta) {
-        menuLines.push(line)
+        const itemText = isPriceLine ? strippedPrice : line
+        if (itemText.trim().length > 0) {
+          menuLines.push(itemText.trim())
+        }
       }
     }
   }

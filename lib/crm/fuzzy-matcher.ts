@@ -48,6 +48,16 @@ export function normalizeHebrewText(text: string): string {
  */
 export function matchBrand(rawText: string): string | null {
   if (!rawText) return null
+
+  // Guard 1: If line contains a currency symbol or price pattern, it is a price line, never a brand
+  if (/(?:₪|ש"?ח|nis|ils)/i.test(rawText)) return null
+
+  // Guard 2: If line starts with a number or quantity (e.g. "2 קוק", "10 גרם", "3 יח"), it is an item line, not a brand
+  if (/^\s*\d+/.test(rawText)) return null
+
+  // Guard 3: If line contains phone number or telegram handle, it is customer meta, not a brand
+  if (/(?:05\d[\- ]?\d{3}|@)/.test(rawText)) return null
+
   const cleaned = normalizeHebrewText(rawText)
   if (!cleaned || cleaned.length < 2) return null
 
@@ -55,7 +65,7 @@ export function matchBrand(rawText: string): string | null {
   const stripHePrefix = (s: string) => s.replace(/^ה(?=[\u0590-\u05FF]{3,})/i, '').trim()
   const cleanedNoHe = stripHePrefix(cleaned)
 
-  // 1. Exact or substring match
+  // 1. Exact or substring match (requiring at least 4 chars for substring containment)
   for (const brand of BRANDS_LIST) {
     const cleanBrand = normalizeHebrewText(brand)
     const cleanBrandNoHe = stripHePrefix(cleanBrand)
@@ -124,9 +134,9 @@ export function matchBrand(rawText: string): string | null {
     }
   }
 
-  // 3. Fuzzy match with Levenshtein distance <= 3
+  // 3. Fuzzy match with Levenshtein distance strictly bounded by brand length
   let bestMatch: string | null = null
-  let minDistance = 4
+  let minDistance = 99
 
   for (const brand of BRANDS_LIST) {
     const cleanBrand = normalizeHebrewText(brand)
@@ -135,7 +145,14 @@ export function matchBrand(rawText: string): string | null {
       levenshteinDistance(cleaned, cleanBrand),
       levenshteinDistance(cleanedNoHe, cleanBrandNoHe)
     )
-    if (dist < minDistance) {
+
+    // Allowed edit distance depends strictly on brand name length:
+    // - Long brand (>= 8 chars): up to 2 edits
+    // - Medium brand (5-7 chars): up to 1 edit
+    // - Short brand (<= 4 chars): 0 edits (exact match only)
+    const maxAllowedDist = cleanBrand.length >= 8 ? 2 : cleanBrand.length >= 5 ? 1 : 0
+
+    if (dist <= maxAllowedDist && dist < minDistance) {
       minDistance = dist
       bestMatch = brand
     }
