@@ -549,7 +549,25 @@ export default function GhostCrmDashboard() {
       const data = await res.json()
       setOrders(data.orders || [])
       setBrands(data.brands || [])
-      setProducts(data.products || [])
+      let fetchedProducts = data.products || []
+      try {
+        const cachedOrderStr = localStorage.getItem('ghostcrm_products_custom_order')
+        if (cachedOrderStr) {
+          const cachedOrder = JSON.parse(cachedOrderStr)
+          if (Array.isArray(cachedOrder) && cachedOrder.length > 0) {
+            const orderMap = new Map<string, number>()
+            cachedOrder.forEach((id: string, idx: number) => orderMap.set(String(id), idx))
+            fetchedProducts = [...fetchedProducts].sort((a: any, b: any) => {
+              const idxA = orderMap.has(a.id) ? orderMap.get(a.id)! : (a.name && orderMap.has(a.name) ? orderMap.get(a.name)! : 999999)
+              const idxB = orderMap.has(b.id) ? orderMap.get(b.id)! : (b.name && orderMap.has(b.name) ? orderMap.get(b.name)! : 999999)
+              return idxA - idxB
+            })
+          }
+        }
+      } catch (e) {
+        console.warn('[GhostCRM] Error parsing local product order:', e)
+      }
+      setProducts(fetchedProducts)
       setCouriers(data.couriers || [])
       if (data.customers) {
         setCustomers(data.customers)
@@ -3158,6 +3176,7 @@ export default function GhostCrmDashboard() {
         {activeNav === 'inventory' && (
           <InventoryRouteView
             products={products}
+            setProducts={setProducts}
             filteredProducts={filteredProducts}
             metrics={metrics}
             t={t}
@@ -3166,6 +3185,9 @@ export default function GhostCrmDashboard() {
             setInventorySearch={setInventorySearch}
             inventoryStatusFilter={inventoryStatusFilter}
             setInventoryStatusFilter={setInventoryStatusFilter}
+            inventoryCategory={inventoryCategory}
+            setInventoryCategory={setInventoryCategory}
+            inventoryCategories={inventoryCategories}
             setAdjustingProduct={setAdjustingProduct}
             setAdjustType={setAdjustType}
             setAdjustQty={setAdjustQty}

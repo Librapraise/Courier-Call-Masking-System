@@ -328,4 +328,34 @@ export function CopyIcon({ className = 'w-4 h-4', ...props }: IconProps) {
   )
 }
 
+export function DragHandleIcon({ className = 'w-4 h-4', ...props }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <circle cx="8" cy="6" r="1.5" />
+      <circle cx="16" cy="6" r="1.5" />
+      <circle cx="8" cy="12" r="1.5" />
+      <circle cx="16" cy="12" r="1.5" />
+      <circle cx="8" cy="18" r="1.5" />
+      <circle cx="16" cy="18" r="1.5" />
+    </svg>
+  )
+}
+
+export function ArrowUpIcon({ className = 'w-3 h-3', ...props }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" {...props}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+    </svg>
+  )
+}
+
+export function ArrowDownIcon({ className = 'w-3 h-3', ...props }: IconProps) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" {...props}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+    </svg>
+  )
+}
+
+
 

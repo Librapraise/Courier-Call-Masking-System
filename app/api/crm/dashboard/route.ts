@@ -11,6 +11,7 @@ import { parseDeliveryMessage, getOrderPaymentInfo } from '@/lib/crm/parser'
 import { matchBrand } from '@/lib/crm/fuzzy-matcher'
 import { getCached, setCached, invalidateDashboardCache } from '@/lib/crm/cache'
 import { getLocalProductCosts, saveLocalProductCost, saveLocalProductCostsBatch } from '@/lib/crm/product-costs'
+import { getLocalProductOrder, saveLocalProductOrder, sortProductsByOrder } from '@/lib/crm/product-order'
 import { parseBatchDepletionMessage, formatDepletionTelegramReport } from '@/lib/crm/depletion-parser'
 
 // In-memory staff authorization cache (60 seconds TTL)
@@ -209,8 +210,9 @@ export async function GET() {
       : BRANDS_LIST.map((name, i) => ({ id: `brand-${i}`, name }))
 
     const localCosts = getLocalProductCosts()
+    const savedProductOrder = getLocalProductOrder()
     const rawProducts = productsRes.data || []
-    const products = rawProducts.map((p: any) => ({
+    const mappedProducts = rawProducts.map((p: any) => ({
       ...p,
       cost_per_unit: Number(
         p.cost_per_unit !== undefined && p.cost_per_unit !== null
@@ -218,6 +220,7 @@ export async function GET() {
           : localCosts[p.id] ?? localCosts[p.name] ?? 0
       )
     }))
+    const products = sortProductsByOrder(mappedProducts, savedProductOrder)
     let couriersData = couriersRes.data || []
 
     let recentDayCloseouts: any[] = closeoutsRes.data || []
@@ -1900,6 +1903,16 @@ export async function POST(req: Request) {
       }
 
       return NextResponse.json({ success: true, deletedProductId: productId })
+    }
+
+    if (action === 'REORDER_PRODUCTS') {
+      const { orderIds } = body
+      if (Array.isArray(orderIds)) {
+        saveLocalProductOrder(orderIds)
+        invalidateDashboardCache()
+        return NextResponse.json({ success: true, count: orderIds.length })
+      }
+      return NextResponse.json({ error: 'orderIds array is required.' }, { status: 400 })
     }
 
     // ========================================================

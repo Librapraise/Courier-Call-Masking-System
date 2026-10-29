@@ -21,7 +21,10 @@ import {
   PlusIcon,
   EditIcon,
   TrashIcon,
-  SettingsIcon
+  SettingsIcon,
+  DragHandleIcon,
+  ArrowUpIcon,
+  ArrowDownIcon
 } from '@/components/crm/CrmIcons'
 import { ParsedDeliveryOrder, getOrderPaymentInfo } from '@/lib/crm/parser'
 import { getIsraelDateString } from '@/lib/crm/date-utils'
@@ -1039,6 +1042,7 @@ export function OrdersRouteView({
 /* ======================================================== */
 export function InventoryRouteView({
   products,
+  setProducts,
   filteredProducts,
   metrics,
   t,
@@ -1047,6 +1051,9 @@ export function InventoryRouteView({
   setInventorySearch,
   inventoryStatusFilter,
   setInventoryStatusFilter,
+  inventoryCategory = 'ALL',
+  setInventoryCategory,
+  inventoryCategories = ['ALL'],
   setAdjustingProduct,
   setAdjustType,
   setAdjustQty,
@@ -1056,6 +1063,7 @@ export function InventoryRouteView({
   onOpenBatchDepletion
 }: {
   products: Product[]
+  setProducts?: React.Dispatch<React.SetStateAction<Product[]>>
   filteredProducts: Product[]
   metrics: DashboardMetrics
   t: any
@@ -1064,6 +1072,9 @@ export function InventoryRouteView({
   setInventorySearch: (s: string) => void
   inventoryStatusFilter: 'ALL' | 'LOW' | 'OUT'
   setInventoryStatusFilter: (f: 'ALL' | 'LOW' | 'OUT') => void
+  inventoryCategory?: string
+  setInventoryCategory?: (c: string) => void
+  inventoryCategories?: string[]
   setAdjustingProduct: (p: Product) => void
   setAdjustType: (t: 'ADD' | 'DEDUCT') => void
   setAdjustQty: (q: string) => void
@@ -1072,6 +1083,159 @@ export function InventoryRouteView({
   onOpenDeleteProduct?: (p: Product) => void
   onOpenBatchDepletion?: () => void
 }) {
+  // Sort state
+  type SortField = 'custom' | 'name' | 'category' | 'stock' | 'unit' | 'cost' | 'totalValue' | 'threshold' | 'status'
+  const [sortField, setSortField] = React.useState<SortField>('custom')
+  const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc'>('asc')
+
+  // Drag and drop state
+  const [draggedProductId, setDraggedProductId] = React.useState<string | null>(null)
+  const [dragOverProductId, setDragOverProductId] = React.useState<string | null>(null)
+  const [isSavingOrder, setIsSavingOrder] = React.useState(false)
+  const [saveNotice, setSaveNotice] = React.useState<string | null>(null)
+
+  // Persist custom order to localStorage and background server API
+  const persistOrder = React.useCallback(async (newOrderIds: string[]) => {
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('ghostcrm_products_custom_order', JSON.stringify(newOrderIds))
+      }
+      setIsSavingOrder(true)
+      await fetch('/api/crm/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'REORDER_PRODUCTS',
+          orderIds: newOrderIds
+        })
+      })
+      setSaveNotice(t.customOrderSaved || 'Custom product order saved')
+      setTimeout(() => setSaveNotice(null), 3500)
+    } catch (e) {
+      console.warn('[GhostCRM] Error persisting product order:', e)
+    } finally {
+      setIsSavingOrder(false)
+    }
+  }, [t.customOrderSaved])
+
+  // Move product directly from source to target slot
+  const handleDrop = React.useCallback((targetId: string) => {
+    if (!draggedProductId || draggedProductId === targetId || !setProducts) {
+      setDraggedProductId(null)
+      setDragOverProductId(null)
+      return
+    }
+
+    setProducts(prev => {
+      const sourceIndex = prev.findIndex(p => p.id === draggedProductId)
+      const targetIndex = prev.findIndex(p => p.id === targetId)
+      if (sourceIndex === -1 || targetIndex === -1) return prev
+
+      const updated = [...prev]
+      const [movedItem] = updated.splice(sourceIndex, 1)
+      updated.splice(targetIndex, 0, movedItem)
+
+      const newIds = updated.map(p => p.id)
+      persistOrder(newIds)
+      return updated
+    })
+
+    setSortField('custom')
+    setDraggedProductId(null)
+    setDragOverProductId(null)
+  }, [draggedProductId, setProducts, persistOrder])
+
+  // Step 1 position Up or Down (1-tap for mobile/touch/trackpad)
+  const handleMoveStep = React.useCallback((productId: string, direction: 'UP' | 'DOWN') => {
+    if (!setProducts) return
+
+    setProducts(prev => {
+      const index = prev.findIndex(p => p.id === productId)
+      if (index === -1) return prev
+
+      const targetIndex = direction === 'UP' ? index - 1 : index + 1
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev
+
+      const updated = [...prev]
+      const [item] = updated.splice(index, 1)
+      updated.splice(targetIndex, 0, item)
+
+      const newIds = updated.map(p => p.id)
+      persistOrder(newIds)
+      return updated
+    })
+
+    setSortField('custom')
+  }, [setProducts, persistOrder])
+
+  // Reset order to default alphabetical
+  const handleResetOrder = React.useCallback(() => {
+    if (!setProducts) return
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('ghostcrm_products_custom_order')
+    }
+    setProducts(prev => {
+      const reset = [...prev].sort((a, b) => a.name.localeCompare(b.name, 'he'))
+      persistOrder(reset.map(p => p.id))
+      return reset
+    })
+    setSortField('custom')
+  }, [setProducts, persistOrder])
+
+  // Interactive header click handler
+  const handleHeaderClick = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortField(field)
+      if (['stock', 'totalValue', 'cost', 'threshold'].includes(field)) {
+        setSortDirection('desc')
+      } else {
+        setSortDirection('asc')
+      }
+    }
+  }
+
+  // Compute final sorted items to display
+  const displayedProducts = React.useMemo(() => {
+    if (sortField === 'custom') {
+      return filteredProducts
+    }
+
+    const items = [...filteredProducts]
+    items.sort((a, b) => {
+      let cmp = 0
+      if (sortField === 'name') {
+        cmp = a.name.localeCompare(b.name, 'he')
+      } else if (sortField === 'category') {
+        cmp = (a.category || '').localeCompare(b.category || '', 'he')
+      } else if (sortField === 'stock') {
+        cmp = (Number(a.stock_on_hand) || 0) - (Number(b.stock_on_hand) || 0)
+      } else if (sortField === 'unit') {
+        cmp = (a.unit || '').localeCompare(b.unit || '')
+      } else if (sortField === 'cost') {
+        cmp = (Number(a.cost_per_unit) || 0) - (Number(b.cost_per_unit) || 0)
+      } else if (sortField === 'totalValue') {
+        const valA = (Number(a.stock_on_hand) || 0) * (Number(a.cost_per_unit) || 0)
+        const valB = (Number(b.stock_on_hand) || 0) * (Number(b.cost_per_unit) || 0)
+        cmp = valA - valB
+      } else if (sortField === 'threshold') {
+        cmp = (Number(a.min_stock_alert) || 0) - (Number(b.min_stock_alert) || 0)
+      } else if (sortField === 'status') {
+        const getPriority = (p: Product) => {
+          const s = Number(p.stock_on_hand) || 0
+          const min = Number(p.min_stock_alert) || 10
+          if (s <= 0) return 0
+          if (s <= min) return 1
+          return 2
+        }
+        cmp = getPriority(a) - getPriority(b)
+      }
+      return sortDirection === 'asc' ? cmp : -cmp
+    })
+    return items
+  }, [filteredProducts, sortField, sortDirection])
+
   return (
     <div className="space-y-6">
       {/* Inventory KPI Summary Bar */}
@@ -1118,33 +1282,154 @@ export function InventoryRouteView({
         </div>
       </div>
 
-      {/* Inventory Search & Status Filters */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-[#0B0F17] p-3.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
-        <div className="relative w-full sm:w-96">
-          <div className={`absolute top-2.5 ${isRtl ? 'right-3' : 'left-3'} text-slate-400 dark:text-slate-500`}>
-            <SearchIcon className="w-4 h-4" />
+      {/* Save Notification Banner */}
+      {saveNotice && (
+        <div className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-semibold shadow-xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">✓</span>
+            <span>{saveNotice}</span>
           </div>
-          <input
-            type="text"
-            value={inventorySearch}
-            onChange={e => setInventorySearch(e.target.value)}
-            placeholder="Search strain or brand name / alias..."
-            className={`w-full py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 ${
-              isRtl ? 'pr-9 pl-4' : 'pl-9 pr-4'
-            }`}
-          />
-          {inventorySearch && (
-            <button
-              onClick={() => setInventorySearch('')}
-              className={`absolute top-2 ${isRtl ? 'left-3' : 'right-3'} text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-700 cursor-pointer`}
-            >
-              ✕
-            </button>
+          <button
+            type="button"
+            onClick={() => setSaveNotice(null)}
+            className="text-xs text-emerald-600 hover:text-emerald-900 dark:hover:text-white font-bold"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Inventory Search & Filters Control Strip */}
+      <div className="space-y-3 bg-white dark:bg-[#0B0F17] p-3.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+          {/* Search Bar */}
+          <div className="relative flex-1 max-w-md">
+            <div className={`absolute top-2.5 ${isRtl ? 'right-3' : 'left-3'} text-slate-400 dark:text-slate-500`}>
+              <SearchIcon className="w-4 h-4" />
+            </div>
+            <input
+              type="text"
+              value={inventorySearch}
+              onChange={e => setInventorySearch(e.target.value)}
+              placeholder="Search strain or brand name / alias..."
+              className={`w-full py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 ${
+                isRtl ? 'pr-9 pl-4' : 'pl-9 pr-4'
+              }`}
+            />
+            {inventorySearch && (
+              <button
+                onClick={() => setInventorySearch('')}
+                className={`absolute top-2 ${isRtl ? 'left-3' : 'right-3'} text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-700 cursor-pointer`}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* Category Dropdown Filter */}
+          {setInventoryCategory && inventoryCategories.length > 1 && (
+            <div className="shrink-0 flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden sm:inline">
+                {t.category}:
+              </span>
+              <select
+                value={inventoryCategory}
+                onChange={e => setInventoryCategory(e.target.value)}
+                className="py-1.5 px-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 cursor-pointer"
+              >
+                {inventoryCategories.map(cat => (
+                  <option key={cat} value={cat}>
+                    {cat === 'ALL' ? (t.allCategories || 'All Categories') : cat}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
+
+          {/* Quick Sort Selector Dropdown */}
+          <div className="shrink-0 flex items-center gap-1.5">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden sm:inline">
+              {t.sortBy || 'Sort Order'}:
+            </span>
+            <select
+              value={
+                sortField === 'custom'
+                  ? 'custom'
+                  : `${sortField}_${sortDirection}`
+              }
+              onChange={e => {
+                const val = e.target.value
+                if (val === 'custom') {
+                  setSortField('custom')
+                } else if (val === 'name_asc') {
+                  setSortField('name')
+                  setSortDirection('asc')
+                } else if (val === 'name_desc') {
+                  setSortField('name')
+                  setSortDirection('desc')
+                } else if (val === 'stock_desc') {
+                  setSortField('stock')
+                  setSortDirection('desc')
+                } else if (val === 'stock_asc') {
+                  setSortField('stock')
+                  setSortDirection('asc')
+                } else if (val === 'totalValue_desc') {
+                  setSortField('totalValue')
+                  setSortDirection('desc')
+                } else if (val === 'cost_desc') {
+                  setSortField('cost')
+                  setSortDirection('desc')
+                } else if (val === 'category_asc') {
+                  setSortField('category')
+                  setSortDirection('asc')
+                } else if (val === 'status_desc') {
+                  setSortField('status')
+                  setSortDirection('asc')
+                }
+              }}
+              className="py-1.5 px-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs font-bold text-[#4352E8] dark:text-indigo-400 focus:outline-none focus:ring-2 focus:ring-[#4352E8]/40 cursor-pointer"
+            >
+              <option value="custom">⠿ {t.sortCustom || 'Custom Order (Drag to Reorder)'}</option>
+              <option value="name_asc">🔤 {t.sortNameAsc || 'Product Name (A → Z)'}</option>
+              <option value="name_desc">🔤 {t.sortNameDesc || 'Product Name (Z → A)'}</option>
+              <option value="stock_desc">📦 {t.sortStockDesc || 'Stock: High → Low'}</option>
+              <option value="stock_asc">📦 {t.sortStockAsc || 'Stock: Low → High'}</option>
+              <option value="totalValue_desc">💰 {t.sortValueDesc || 'Total Value: High → Low'}</option>
+              <option value="cost_desc">💵 {t.sortCostDesc || 'Cost / Unit: High → Low'}</option>
+              <option value="category_asc">🏷️ {t.sortCategory || 'Category (A → Z)'}</option>
+              <option value="status_desc">⚠️ {t.sortStatus || 'Status (Alerts First)'}</option>
+            </select>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2 shrink-0">
+            {onOpenBatchDepletion && (
+              <button
+                type="button"
+                onClick={onOpenBatchDepletion}
+                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 via-rose-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white text-xs font-bold transition shadow-md flex items-center gap-1.5 cursor-pointer shrink-0"
+                title={isRtl ? 'הדבק רשימת מוצרים לפריקה מהמלאי והפקת דוח כספי' : 'Paste end-of-day depletion message to update stock and generate COGS report'}
+              >
+                <span>⚡</span>
+                <span>{isRtl ? 'פריקת מלאי יומית' : 'End-of-Day Depletion'}</span>
+              </button>
+            )}
+
+            {onOpenAddProduct && (
+              <button
+                type="button"
+                onClick={onOpenAddProduct}
+                className="px-3.5 py-1.5 rounded-xl bg-[#4352E8] hover:bg-[#3442cb] text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+              >
+                <PlusIcon className="w-4 h-4" />
+                <span>Add Product</span>
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Status Filter Toggles & Add Action */}
-        <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+        {/* Status Filter Buttons Strip & Helper Hint */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/60">
           <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 border border-transparent dark:border-slate-800">
             <button
               onClick={() => setInventoryStatusFilter('ALL')}
@@ -1178,27 +1463,19 @@ export function InventoryRouteView({
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            {onOpenBatchDepletion && (
+          <div className="flex items-center gap-3 text-[11px] text-slate-400 dark:text-slate-500">
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400 dark:text-slate-500">⠿</span>
+              <span>{t.dragToReorderHint || 'Drag rows (⠿) or use arrows (↑ ↓) to arrange in any order'}</span>
+            </div>
+            {sortField === 'custom' && (
               <button
                 type="button"
-                onClick={onOpenBatchDepletion}
-                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 via-rose-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white text-xs font-bold transition shadow-md flex items-center gap-1.5 cursor-pointer shrink-0"
-                title={isRtl ? 'הדבק רשימת מוצרים לפריקה מהמלאי והפקת דוח כספי' : 'Paste end-of-day depletion message to update stock and generate COGS report'}
+                onClick={handleResetOrder}
+                className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
+                title="Reset order to alphabetical catalog sequence"
               >
-                <span>⚡</span>
-                <span>{isRtl ? 'פריקת מלאי יומית' : 'End-of-Day Depletion'}</span>
-              </button>
-            )}
-
-            {onOpenAddProduct && (
-              <button
-                type="button"
-                onClick={onOpenAddProduct}
-                className="px-3.5 py-1.5 rounded-xl bg-[#4352E8] hover:bg-[#3442cb] text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
-              >
-                <PlusIcon className="w-4 h-4" />
-                <span>Add Product</span>
+                {t.resetCustomOrder || 'Reset Order'}
               </button>
             )}
           </div>
@@ -1210,20 +1487,139 @@ export function InventoryRouteView({
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse" dir={isRtl ? 'rtl' : 'ltr'}>
             <thead>
-              <tr className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-100 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                <th className="py-3.5 px-4">{t.productName}</th>
-                <th className="py-3.5 px-3">{t.category}</th>
-                <th className="py-3.5 px-3">{t.stockOnHand}</th>
-                <th className="py-3.5 px-3">{t.unit}</th>
-                <th className="py-3.5 px-3">{isRtl ? 'עלות ליח׳ / גרם' : 'Cost / Unit'}</th>
-                <th className="py-3.5 px-3">{isRtl ? 'שווי במלאי' : 'Total Value'}</th>
-                <th className="py-3.5 px-3">{t.minStock}</th>
-                <th className="py-3.5 px-3">{t.status}</th>
+              <tr className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-100 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider select-none">
+                {/* Reorder / Position Column */}
+                <th className="py-3.5 px-3 text-center w-24">
+                  <button
+                    type="button"
+                    onClick={() => setSortField('custom')}
+                    className={`inline-flex items-center gap-1 text-[11px] font-bold transition hover:text-slate-900 dark:hover:text-white cursor-pointer ${
+                      sortField === 'custom' ? 'text-[#4352E8] dark:text-indigo-400' : ''
+                    }`}
+                    title="Active Custom Sequence"
+                  >
+                    <span>#</span>
+                    <span>⇅</span>
+                  </button>
+                </th>
+
+                {/* Product / Strain Column */}
+                <th className="py-3.5 px-4">
+                  <button
+                    type="button"
+                    onClick={() => handleHeaderClick('name')}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase transition hover:text-slate-900 dark:hover:text-white cursor-pointer group"
+                  >
+                    <span>{t.productName}</span>
+                    <span className={`text-[10px] ${sortField === 'name' ? 'text-[#4352E8] dark:text-indigo-400 font-extrabold' : 'text-slate-300 dark:text-slate-600 group-hover:text-slate-400'}`}>
+                      {sortField === 'name' ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
+                    </span>
+                  </button>
+                </th>
+
+                {/* Category Column */}
+                <th className="py-3.5 px-3">
+                  <button
+                    type="button"
+                    onClick={() => handleHeaderClick('category')}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase transition hover:text-slate-900 dark:hover:text-white cursor-pointer group"
+                  >
+                    <span>{t.category}</span>
+                    <span className={`text-[10px] ${sortField === 'category' ? 'text-[#4352E8] dark:text-indigo-400 font-extrabold' : 'text-slate-300 dark:text-slate-600 group-hover:text-slate-400'}`}>
+                      {sortField === 'category' ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
+                    </span>
+                  </button>
+                </th>
+
+                {/* Stock on Hand Column */}
+                <th className="py-3.5 px-3">
+                  <button
+                    type="button"
+                    onClick={() => handleHeaderClick('stock')}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase transition hover:text-slate-900 dark:hover:text-white cursor-pointer group"
+                  >
+                    <span>{t.stockOnHand}</span>
+                    <span className={`text-[10px] ${sortField === 'stock' ? 'text-[#4352E8] dark:text-indigo-400 font-extrabold' : 'text-slate-300 dark:text-slate-600 group-hover:text-slate-400'}`}>
+                      {sortField === 'stock' ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
+                    </span>
+                  </button>
+                </th>
+
+                {/* Unit Column */}
+                <th className="py-3.5 px-3">
+                  <button
+                    type="button"
+                    onClick={() => handleHeaderClick('unit')}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase transition hover:text-slate-900 dark:hover:text-white cursor-pointer group"
+                  >
+                    <span>{t.unit}</span>
+                    <span className={`text-[10px] ${sortField === 'unit' ? 'text-[#4352E8] dark:text-indigo-400 font-extrabold' : 'text-slate-300 dark:text-slate-600 group-hover:text-slate-400'}`}>
+                      {sortField === 'unit' ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
+                    </span>
+                  </button>
+                </th>
+
+                {/* Cost / Unit Column */}
+                <th className="py-3.5 px-3">
+                  <button
+                    type="button"
+                    onClick={() => handleHeaderClick('cost')}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase transition hover:text-slate-900 dark:hover:text-white cursor-pointer group"
+                  >
+                    <span>{isRtl ? 'עלות ליח׳ / גרם' : 'Cost / Unit'}</span>
+                    <span className={`text-[10px] ${sortField === 'cost' ? 'text-[#4352E8] dark:text-indigo-400 font-extrabold' : 'text-slate-300 dark:text-slate-600 group-hover:text-slate-400'}`}>
+                      {sortField === 'cost' ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
+                    </span>
+                  </button>
+                </th>
+
+                {/* Total Value Column */}
+                <th className="py-3.5 px-3">
+                  <button
+                    type="button"
+                    onClick={() => handleHeaderClick('totalValue')}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase transition hover:text-slate-900 dark:hover:text-white cursor-pointer group"
+                  >
+                    <span>{isRtl ? 'שווי במלאי' : 'Total Value'}</span>
+                    <span className={`text-[10px] ${sortField === 'totalValue' ? 'text-[#4352E8] dark:text-indigo-400 font-extrabold' : 'text-slate-300 dark:text-slate-600 group-hover:text-slate-400'}`}>
+                      {sortField === 'totalValue' ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
+                    </span>
+                  </button>
+                </th>
+
+                {/* Threshold Column */}
+                <th className="py-3.5 px-3">
+                  <button
+                    type="button"
+                    onClick={() => handleHeaderClick('threshold')}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase transition hover:text-slate-900 dark:hover:text-white cursor-pointer group"
+                  >
+                    <span>{t.minStock}</span>
+                    <span className={`text-[10px] ${sortField === 'threshold' ? 'text-[#4352E8] dark:text-indigo-400 font-extrabold' : 'text-slate-300 dark:text-slate-600 group-hover:text-slate-400'}`}>
+                      {sortField === 'threshold' ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
+                    </span>
+                  </button>
+                </th>
+
+                {/* Status Column */}
+                <th className="py-3.5 px-3">
+                  <button
+                    type="button"
+                    onClick={() => handleHeaderClick('status')}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase transition hover:text-slate-900 dark:hover:text-white cursor-pointer group"
+                  >
+                    <span>{t.status}</span>
+                    <span className={`text-[10px] ${sortField === 'status' ? 'text-[#4352E8] dark:text-indigo-400 font-extrabold' : 'text-slate-300 dark:text-slate-600 group-hover:text-slate-400'}`}>
+                      {sortField === 'status' ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
+                    </span>
+                  </button>
+                </th>
+
                 <th className="py-3.5 px-4 text-center">Actions / פעולות</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-xs">
-              {filteredProducts.map(prod => {
+              {displayedProducts.map((prod, index) => {
                 const stock = Number(prod.stock_on_hand) || 0
                 const cost = Number(prod.cost_per_unit) || 0
                 const minAlert = Number(prod.min_stock_alert) || 10
@@ -1237,9 +1633,87 @@ export function InventoryRouteView({
                   : 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30'
 
                 const statusLabel = isOut ? t.stockOut : isLow ? t.stockLow : t.stockHealthy
+                const isDragging = draggedProductId === prod.id
+                const isOver = dragOverProductId === prod.id && !isDragging
 
                 return (
-                  <tr key={prod.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                  <tr
+                    key={prod.id}
+                    draggable={true}
+                    onDragStart={e => {
+                      e.dataTransfer.setData('text/plain', prod.id)
+                      e.dataTransfer.effectAllowed = 'move'
+                      setDraggedProductId(prod.id)
+                    }}
+                    onDragOver={e => {
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'move'
+                      if (dragOverProductId !== prod.id) {
+                        setDragOverProductId(prod.id)
+                      }
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverProductId === prod.id) {
+                        setDragOverProductId(null)
+                      }
+                    }}
+                    onDrop={e => {
+                      e.preventDefault()
+                      handleDrop(prod.id)
+                    }}
+                    onDragEnd={() => {
+                      setDraggedProductId(null)
+                      setDragOverProductId(null)
+                    }}
+                    className={`transition-colors duration-150 ${
+                      isDragging
+                        ? 'opacity-40 bg-indigo-50 dark:bg-indigo-950/40'
+                        : isOver
+                        ? 'bg-indigo-50/80 dark:bg-indigo-900/30 border-t-2 border-indigo-500 shadow-sm'
+                        : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
+                    }`}
+                  >
+                    {/* Reorder Handle & Step Buttons */}
+                    <td className="py-3 px-2 text-center whitespace-nowrap">
+                      <div className="flex items-center justify-center gap-1">
+                        {/* Drag Handle Icon */}
+                        <div
+                          className="p-1 rounded-md text-slate-400 hover:text-[#4352E8] dark:hover:text-indigo-400 cursor-grab active:cursor-grabbing hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                          title="Click and drag to rearrange position in list"
+                        >
+                          <DragHandleIcon className="w-4 h-4" />
+                        </div>
+
+                        {/* Position Index Number */}
+                        <span className="text-[10px] font-mono font-bold text-slate-400 dark:text-slate-500 w-5 text-center">
+                          {index + 1}
+                        </span>
+
+                        {/* Move Up / Move Down 1-Click Buttons */}
+                        <div className="flex flex-col -space-y-0.5">
+                          <button
+                            type="button"
+                            disabled={index === 0}
+                            onClick={() => handleMoveStep(prod.id, 'UP')}
+                            className="p-0.5 rounded text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-20 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed"
+                            title="Move product up 1 position"
+                          >
+                            <ArrowUpIcon className="w-2.5 h-2.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={index === displayedProducts.length - 1}
+                            onClick={() => handleMoveStep(prod.id, 'DOWN')}
+                            className="p-0.5 rounded text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-20 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed"
+                            title="Move product down 1 position"
+                          >
+                            <ArrowDownIcon className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Product Name & Aliases */}
                     <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white">
                       <div>
                         <span>{prod.name}</span>
@@ -1250,31 +1724,47 @@ export function InventoryRouteView({
                         )}
                       </div>
                     </td>
+
+                    {/* Category */}
                     <td className="py-3.5 px-3">
                       <span className="px-2.5 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] font-semibold">
                         {prod.category}
                       </span>
                     </td>
+
+                    {/* Stock on Hand */}
                     <td className="py-3.5 px-3 font-mono font-extrabold text-sm text-slate-900 dark:text-white">
                       {stock.toLocaleString()}
                     </td>
+
+                    {/* Unit */}
                     <td className="py-3.5 px-3 text-slate-500 dark:text-slate-400 font-semibold">
                       {prod.unit === 'g' ? t.grams : t.units}
                     </td>
+
+                    {/* Cost / Unit */}
                     <td className="py-3.5 px-3 font-mono text-slate-700 dark:text-slate-300 font-semibold">
                       {cost > 0 ? `₪${cost.toFixed(2)}` : <span className="text-slate-400">0.00 ₪</span>}
                     </td>
+
+                    {/* Total Value */}
                     <td className="py-3.5 px-3 font-mono font-bold text-emerald-600 dark:text-emerald-400">
                       ₪{(stock * cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
+
+                    {/* Min Alert Threshold */}
                     <td className="py-3.5 px-3 text-slate-400 dark:text-slate-500 font-mono">
                       {minAlert} {prod.unit === 'g' ? t.grams : t.units}
                     </td>
+
+                    {/* Stock Status Badge */}
                     <td className="py-3.5 px-3">
                       <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${statusBadge}`}>
                         {statusLabel}
                       </span>
                     </td>
+
+                    {/* Actions */}
                     <td className="py-3.5 px-4 text-center">
                       <div className="flex items-center justify-center gap-1.5">
                         <button
